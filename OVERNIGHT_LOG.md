@@ -23,11 +23,25 @@ Observe → Understand → Change ran end to end, unattended, with no manual ste
 7. **Verified in Studio: the rugby shirt moved Slot_G → Slot_F and the plush
    goose moved Slot_F → Slot_G, and the world is now stamped `exp_01`.**
 
-You are on the **top tier of the fallback ladder**, not a fallback. Record a
-screen capture of this before changing anything.
+You are on the **top tier of the fallback ladder**, not a fallback. Fallback 2
+(the Studio plugin, no MCP at all) is also built and its apply and rollback
+paths are tested, so there is a rung below you as well.
 
-To re-run it yourself: `npm run dev` in `app/`, `npx tsx index.ts` in `bridge/`,
-open http://localhost:3000, press ANALYZE, then SAVE, then APPLY TO ROBLOX.
+**FIRST THING TO DO: record the loop.** The dev server and the Bridge are both
+still running, and Studio is at baseline. Open http://localhost:3000, press
+ANALYZE → SAVE → APPLY TO ROBLOX with Studio visible, and capture it. It takes
+about a minute and it is the thing that makes the demo safe.
+
+If they are not running any more:
+`cd app && npm run dev`, then `cd bridge && npx tsx index.ts`.
+
+**SECOND THING: the single most important item to look at is the Shopify
+scopes**, below. Two checkboxes in the Shopify admin, no code changes, and it
+turns the attribution story from "built but unprovable" into a live demo.
+
+**Do not close the terminal running `cloudflared`.** It is a quick tunnel, so
+its URL changes on restart, and Roblox and the Shopify webhook both point at
+the current one.
 
 ### Phase status at hand-off
 
