@@ -88,3 +88,92 @@ Studio) is achievable, not theoretical.**
   GameplayGui" warnings in the console. Pre-existing, unrelated to our code,
   left alone per instruction.
 
+### Phase 2 (spec hours 2–5) — storefront built in the existing arena: WORKING
+
+Repurposed the existing Blaster arena as instructed rather than building a new
+room. Found usable space by raycasting a grid rather than guessing: the floor
+near the pink spawn is flat at Y=5 with about 14 studs of headroom, and the
+template's cover props double as real sightline blockers, which the
+"saw it vs never saw it" metric actually needs.
+
+**8 slots placed** (`Workspace.Storefront.Slots`), tagged `StorefrontSlot`.
+Each was probed before placing — floor height and overhead clearance checked,
+with a nudge search if blocked. None needed nudging; all 8 sit on floor at
+Y=5 with 14 studs clear. `trafficRank` is assigned 1–8 by real distance from
+the pink spawn, so rank 1 genuinely is the busiest corridor:
+
+| Slot | Position (x,z) | Rank | Faces |
+|---|---|---|---|
+| Slot_B | -60, 30 | 1 | aisle |
+| Slot_A | -100, 30 | 2 | aisle |
+| Slot_D | -50, 45 | 3 | aisle |
+| Slot_C | -110, 45 | 4 | aisle |
+| Slot_F | -65, 80 | 5 | aisle |
+| Slot_E | -95, 80 | 6 | aisle |
+| Slot_H | -55, 105 | 7 | aisle |
+| Slot_G | -105, 105 | 8 | aisle |
+
+**5 components built** (`Workspace.Storefront.Components`), tagged
+`StorefrontComponent`, from `ComponentLibrary.lua` — 4 procedural mannequins
+plus one plush stand, per your mapping. Each has a ProximityPrompt, a sign
+with header + CTA text, and a billboard showing title and price.
+
+| Component | Product | Price | Slot | Rank |
+|---|---|---|---|---|
+| display_classic_tee | Waterloo Classic Tee | $19.99 | Slot_B | 1 |
+| display_crewneck | Waterloo Crewneck | $49.99 | Slot_A | 2 |
+| display_sweatpants | Waterloo Sweatpants | $39.99 | Slot_D | 3 |
+| display_plush_goose | Plush Goose | $19.99 | Slot_F | 5 |
+| display_rugby_shirt | Waterloo Collegiate Rugby | $99.99 | Slot_G | 8 |
+
+I deliberately put the most expensive item (the $99.99 rugby shirt) in the
+worst slot. That gives the AI a real, defensible finding to make rather than a
+manufactured one, and it is the kind of thing the funnel metrics should
+surface on their own.
+
+Verified by: reading every tagged instance back out of the place and printing
+its attributes — all 5 show the right slot, kind, prompt enabled, sign text,
+billboard title/price, and a facing vector pointing at the aisle.
+
+**Not using Rojo**, per your call. Instead `bridge/push-scripts.ts` pushes
+`roblox/src/**/*.lua` into the place over MCP, so code still lives in
+committed files. It recreates each script instance on push, because `require`
+caches by instance and would otherwise keep serving stale source — that cost
+me two confusing failures before I worked it out.
+
+Also confirmed **spec gotcha #8 does not apply**: `require()` works fine from
+the Edit command bar here, so `StorefrontAPI` can be a normal ModuleScript and
+does not need its source inlined into every call.
+
+---
+
+## BLOCKED — needs you
+
+### Studio's 3D viewport renders blank, so screenshots are unusable
+
+`screen_capture` returns a white image with only the 2D GUI layer drawn (the
+template's `00:00` timer). Tried three ways: passing `camera_position` to the
+capture tool, setting `workspace.CurrentCamera.CFrame` directly then
+capturing, and moving the camera far outside the building looking down. All
+three return the same blank white frame, so it is the viewport not rendering,
+not the camera pointing somewhere empty.
+
+The first screenshot I took tonight (before any playtest) rendered correctly,
+so something about the place entering and leaving play mode, or the Studio
+window being minimised/behind other windows, stopped the viewport rendering.
+
+**What I need from you:** bring the Roblox Studio window to the foreground and
+make sure it is not minimised, then tell me and I will re-test in one call.
+
+**Impact if it stays broken:** only the before/after screenshot feature (spec
+hours 22–25). The spec's own cut list already says take those manually if
+needed, so this does not threaten the core demo. Everything else — telemetry,
+metrics, AI plan, and applying changes to Studio — is unaffected, and I am
+carrying on with those.
+
+### Pathfinding does not work in this map
+
+`character_navigation` cannot route anywhere (tried an instance target and raw
+coordinates). The auto-playtest bot will need to move the character by setting
+its CFrame along a scripted route instead. Not blocking; noted for that phase.
+
