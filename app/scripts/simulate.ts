@@ -40,6 +40,7 @@ type Registry = {
     title: string;
     price: number;
     slotId: string;
+    kind: string;
     prominence: number;
     interactionEnabled: boolean;
     pos: number[];
@@ -74,9 +75,7 @@ function uuid(): string {
 }
 
 async function main() {
-  const sessionCount = Number(
-    process.argv[process.argv.indexOf("--sessions") + 1] || 400,
-  );
+  const sessionCount = Number(process.argv[process.argv.indexOf("--sessions") + 1] || 400);
 
   const res = await fetch(`${BASE_URL}/api/registry`);
   if (!res.ok) {
@@ -128,64 +127,75 @@ async function main() {
   console.log(`[sim] done: ${posted} sessions, ${eventCount} events, all tagged source="sim"`);
 }
 
-function buildSession(
-  registry: Registry,
-  rankBySlot: Map<string, number>,
-  t0: number,
-): SimEvent[] {
+function buildSession(registry: Registry, rankBySlot: Map<string, number>, t0: number): SimEvent[] {
   const events: SimEvent[] = [];
   let t = t0;
-
-  events.push({ t, type: "session_started", pos: SPAWN });
-
-  // Walk up the aisle. Players who lose interest turn back early, which is
-  // what makes far slots genuinely worse rather than uniformly worse.
-  const patience = rand(0.35, 1.0);
-  const walkDepth = 30 + patience * 90;
-  let z = 0;
-  let lastPathZ = -99;
+  let pos: number[] = [...SPAWN];
   const walkSpeed = rand(11, 17);
 
-  const encounters: { componentId: string; z: number }[] = [];
-  for (const c of registry.components) {
-    if (c.pos[2] <= walkDepth) encounters.push({ componentId: c.componentId, z: c.pos[2] });
-  }
-  encounters.sort((a, b) => a.z - b.z);
+  // Players who lose interest turn back early, which is what makes a far slot
+  // genuinely worse rather than uniformly worse.
+  const patience = rand(0.35, 1.0);
+  const walkDepth = 30 + patience * 90;
 
-  while (z < walkDepth) {
-    z += rand(2.5, 6);
-    t += rand(2.5, 6) / walkSpeed;
-    if (z - lastPathZ > 2) {
-      events.push({
-        t,
-        type: "path_point",
-        pos: [AISLE_X + rand(-9, 9), 5, z],
-        look: [rand(-0.3, 0.3), 0, 1],
-      });
-      lastPathZ = z;
+  const unit = (from: number[], to: number[]): number[] => {
+    const dx = to[0] - from[0];
+    const dz = to[2] - from[2];
+    const len = Math.hypot(dx, dz) || 1;
+    return [dx / len, 0, dz / len];
+  };
+
+  // Walks the player there for real, dropping path points on the way. A
+  // heatmap is only meaningful if the trail is where a body actually went.
+  const walkTo = (target: number[], lookAt?: number[]) => {
+    const dist = Math.hypot(target[0] - pos[0], target[2] - pos[2]);
+    const steps = Math.max(1, Math.round(dist / rand(2.2, 3.4)));
+    for (let i = 1; i <= steps; i++) {
+      const remaining = steps - i + 1;
+      pos = [
+        pos[0] + (target[0] - pos[0]) / remaining + rand(-0.6, 0.6),
+        5,
+        pos[2] + (target[2] - pos[2]) / remaining + rand(-0.6, 0.6),
+      ];
+      t += dist / steps / walkSpeed;
+      events.push({ t, type: "path_point", pos: [...pos], look: unit(pos, lookAt ?? target) });
     }
-  }
+  };
 
-  for (const enc of encounters) {
-    const component = registry.components.find((c) => c.componentId === enc.componentId)!;
+  events.push({ t, type: "session_started", pos: [...pos] });
+
+  const inRange = registry.components
+    .filter((c) => c.pos[2] <= walkDepth)
+    .sort((a, b) => a.pos[2] - b.pos[2]);
+
+  for (const component of inRange) {
     const rank = rankBySlot.get(component.slotId) ?? 8;
     const appeal = APPEAL[component.componentId] ?? DEFAULT_APPEAL;
     const prominenceBonus = (component.prominence - 1) * 0.08;
-    t += rand(1.5, 4);
 
-    // Did they ever see it? This is the distinction a web pixel cannot make.
-    const pImpression = clamp(1.02 - 0.085 * rank, 0.25, 0.97);
-    if (!chance(pImpression)) continue;
+    // Stand-off point between the display and the aisle it faces.
+    const side = component.pos[0] < AISLE_X ? 1 : -1;
+    const standPoint = [component.pos[0] + side * rand(4, 6), 5, component.pos[2] + rand(-3, 3)];
+    const aislePoint = [AISLE_X + rand(-7, 7), 5, component.pos[2] - rand(6, 14)];
 
-    const distance = rand(22, 38);
+    walkTo(aislePoint, component.pos);
+
+    // Did they ever see it? The distinction a web pixel cannot make.
+    if (!chance(clamp(1.02 - 0.085 * rank, 0.25, 0.97))) continue;
+
     events.push({
       t,
       type: "display_impression",
       surface: "physical",
       componentId: component.componentId,
       productId: component.productId,
-      pos: [AISLE_X + rand(-6, 6), 5, enc.z - rand(14, 24)],
-      meta: { distance: Number(distance.toFixed(1)) },
+      pos: [...pos],
+      look: unit(pos, component.pos),
+      meta: {
+        distance: Number(
+          Math.hypot(component.pos[0] - pos[0], component.pos[2] - pos[2]).toFixed(1),
+        ),
+      },
     });
 
     const pApproach = clamp(
@@ -195,7 +205,10 @@ function buildSession(
     );
     if (!chance(pApproach)) continue;
 
-    t += rand(1, 3);
+    // They divert out of the aisle to the display. This detour is the shape a
+    // traffic heatmap should actually show.
+    walkTo(standPoint, component.pos);
+
     // Everything faces the aisle, so most approaches are head-on; the tail is
     // people cutting across from behind.
     const bearing = chance(0.82) ? rand(0, 55) : rand(95, 175);
@@ -205,7 +218,8 @@ function buildSession(
       surface: "physical",
       componentId: component.componentId,
       productId: component.productId,
-      pos: [component.pos[0] + rand(-4, 4), 5, component.pos[2] + rand(-4, 4)],
+      pos: [...pos],
+      look: unit(pos, component.pos),
       meta: {
         fromSlot: "aisle",
         approachBearing: Number(bearing.toFixed(1)),
@@ -214,13 +228,14 @@ function buildSession(
     });
 
     const dwell = clamp(lognormalish(4.5 + appeal * 7, 0.55), 1.2, 60);
-    const minDistance = rand(2.4, 7.5);
+    const minDistance = Number(
+      Math.hypot(component.pos[0] - pos[0], component.pos[2] - pos[2]).toFixed(1),
+    );
     const minSpeed = rand(0, 9);
-
     const sawIt = bearing < 90;
-    const pGaze = sawIt ? 0.82 : 0.22;
+
     let gazeSeconds = 0;
-    if (chance(pGaze)) {
+    if (chance(sawIt ? 0.82 : 0.22)) {
       gazeSeconds = clamp(lognormalish(1.8 + appeal * 4.5, 0.6), 0.75, 40);
       t += gazeSeconds;
       events.push({
@@ -229,10 +244,9 @@ function buildSession(
         surface: "physical",
         componentId: component.componentId,
         productId: component.productId,
-        meta: {
-          gazeSeconds: Number(gazeSeconds.toFixed(2)),
-          distance: Number(minDistance.toFixed(1)),
-        },
+        pos: [...pos],
+        look: unit(pos, component.pos),
+        meta: { gazeSeconds: Number(gazeSeconds.toFixed(2)), distance: minDistance },
       });
     }
 
@@ -249,6 +263,7 @@ function buildSession(
         surface: "physical",
         componentId: component.componentId,
         productId: component.productId,
+        pos: [...pos],
         meta: { minSpeed: Number(minSpeed.toFixed(1)), gazeSeconds: Number(gazeSeconds.toFixed(2)) },
       });
     }
@@ -261,6 +276,7 @@ function buildSession(
         surface: "physical",
         componentId: component.componentId,
         productId: component.productId,
+        pos: [...pos],
         meta: { holdSeconds: 0.4 },
       });
 
@@ -278,25 +294,45 @@ function buildSession(
         const openSeconds = clamp(lognormalish(6 + appeal * 9, 0.6), 1.5, 90);
         const activeSeconds = clamp(openSeconds * rand(0.35, 0.95), 0.5, openSeconds);
 
+        // Clothing panels list the whole range, so a player standing at one
+        // mannequin can browse to another. Whatever they end up wanting is
+        // attention this display earned for a product it is not showing.
+        let shown = component;
         const engagements = Math.floor(rand(0, 1.2 + appeal * 5));
         for (let e = 0; e < engagements; e++) {
           t += rand(0.6, 2.4);
-          const action = ["variant_select", "image_next", "scroll", "tab"][
-            Math.floor(Math.random() * 4)
-          ];
+          const canTab = component.kind === "Mannequin";
+          const action = canTab
+            ? ["variant_select", "image_next", "scroll", "tab"][Math.floor(Math.random() * 4)]
+            : ["variant_select", "image_next", "scroll"][Math.floor(Math.random() * 3)];
+
+          const meta: Record<string, unknown> = { action };
+          if (action === "tab") {
+            const others = registry.components.filter(
+              (c) => c.kind === "Mannequin" && c.componentId !== shown.componentId,
+            );
+            if (others.length > 0) {
+              const target = others[Math.floor(Math.random() * others.length)];
+              meta.toComponentId = target.componentId;
+              meta.fromComponentId = component.componentId;
+              shown = target;
+            }
+          }
+
           events.push({
             t,
             type: "panel_engaged",
             surface: "gui",
-            componentId: component.componentId,
-            productId: component.productId,
-            meta: { action },
+            componentId: shown.componentId,
+            productId: shown.productId,
+            meta,
           });
         }
 
         // Expensive things lose people at the decision, not at the display.
-        const priceResistance = clamp(component.price / 260, 0, 0.34);
-        const pCta = clamp(0.12 + 0.72 * appeal - priceResistance, 0.02, 0.82);
+        const shownAppeal = APPEAL[shown.componentId] ?? DEFAULT_APPEAL;
+        const priceResistance = clamp(shown.price / 260, 0, 0.34);
+        const pCta = clamp(0.12 + 0.72 * shownAppeal - priceResistance, 0.02, 0.82);
         const clicked = activeSeconds > 2 && chance(pCta);
 
         if (clicked) {
@@ -305,16 +341,16 @@ function buildSession(
             t,
             type: "panel_cta_clicked",
             surface: "gui",
-            componentId: component.componentId,
-            productId: component.productId,
+            componentId: shown.componentId,
+            productId: shown.productId,
           });
           t += rand(0.3, 1.2);
           events.push({
             t,
             type: "shopify_link_shown",
             surface: "gui",
-            componentId: component.componentId,
-            productId: component.productId,
+            componentId: shown.componentId,
+            productId: shown.productId,
             meta: { claimCode: `SIM-${Math.floor(Math.random() * 1e6)}` },
           });
         }
@@ -324,8 +360,8 @@ function buildSession(
           t,
           type: "panel_closed",
           surface: "gui",
-          componentId: component.componentId,
-          productId: component.productId,
+          componentId: shown.componentId,
+          productId: shown.productId,
           meta: {
             openSeconds: Number(openSeconds.toFixed(2)),
             activeSeconds: Number(activeSeconds.toFixed(2)),
@@ -342,20 +378,24 @@ function buildSession(
       surface: "physical",
       componentId: component.componentId,
       productId: component.productId,
+      pos: [...pos],
       meta: {
         dwellSeconds: Number(dwell.toFixed(2)),
-        minDistance: Number(minDistance.toFixed(1)),
+        minDistance,
         minSpeed: Number(minSpeed.toFixed(1)),
         hadLineOfSight: sawIt,
       },
     });
+
+    // Back out to the aisle before carrying on.
+    walkTo([AISLE_X + rand(-6, 6), 5, component.pos[2] + rand(2, 8)]);
   }
 
   t += rand(2, 8);
   events.push({
     t,
     type: "session_ended",
-    pos: [AISLE_X + rand(-8, 8), 5, z],
+    pos: [...pos],
     meta: { durationSeconds: Number((t - t0).toFixed(1)) },
   });
 

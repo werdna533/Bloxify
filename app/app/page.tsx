@@ -5,6 +5,7 @@ import type { Analytics, ComponentRow } from "@/lib/types";
 import { StoreMap } from "@/components/StoreMap";
 import { FunnelTable } from "@/components/FunnelTable";
 import { ExperimentPanel } from "@/components/ExperimentPanel";
+import { StoreHeat3D } from "@/components/StoreHeat3D";
 
 export default function Lab() {
   const [data, setData] = useState<Analytics | null>(null);
@@ -97,6 +98,11 @@ export default function Lab() {
               <FunnelTable rows={data.components} />
             </section>
           </div>
+
+          <section className="mt-10">
+            <SectionTitle>ATTENTION IN SPACE</SectionTitle>
+            <StoreHeat3D source={source} />
+          </section>
 
           <section className="mt-10">
             <ExperimentPanel />

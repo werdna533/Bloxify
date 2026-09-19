@@ -52,6 +52,34 @@ async function report(body: Record<string, unknown>): Promise<void> {
   }
 }
 
+/**
+ * Pulls the registry back out of Studio and stores it.
+ *
+ * Without this the backend keeps describing the layout from before the apply,
+ * so the dashboard draws displays in the wrong slots and the model reasons
+ * about a store that no longer exists — and nothing looks broken while it does.
+ */
+async function refreshRegistry(bridge: StudioBridge): Promise<void> {
+  const result = await bridge.executeLuau(
+    `return require(game.ServerScriptService.Storefront.StorefrontAPI).registry()`,
+    "Edit",
+  );
+  if (result.isError) {
+    console.error(`[bridge] registry refresh failed: ${result.text}`);
+    return;
+  }
+  try {
+    const res = await fetch(`${BASE_URL}/api/registry`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: result.text,
+    });
+    console.log(`[bridge] registry refreshed (${res.status})`);
+  } catch (error) {
+    console.error("[bridge] could not post refreshed registry:", error);
+  }
+}
+
 /** Long-bracket level that cannot collide with the JSON payload. */
 function luauLongString(payload: string): string {
   let eq = "==";
@@ -134,6 +162,7 @@ async function applyExperiment(bridge: StudioBridge, pending: Pending): Promise<
     console.warn(`[bridge] ${experimentId}: screen_capture failed, skipping:`, error);
   }
 
+  await refreshRegistry(bridge);
   await report({ experimentId, stage: "captured" });
   console.log(`[bridge] ${experimentId}: done`);
 }
@@ -152,6 +181,7 @@ async function restoreExperiment(bridge: StudioBridge, pending: Pending): Promis
     return;
   }
   console.log(`[bridge] ${experimentId}: restored — ${result.text}`);
+  await refreshRegistry(bridge);
   await report({ experimentId, stage: "rolled_back" });
 }
 
