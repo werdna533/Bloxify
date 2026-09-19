@@ -17,8 +17,8 @@ export function StoreMap({
 }) {
   if (slots.length === 0) {
     return (
-      <p className="rounded border border-neutral-800 p-4 text-xs text-neutral-500">
-        No registry yet. Run <code className="text-neutral-300">npx tsx bridge/pull-registry.ts</code>
+      <p className="rbx-inset p-4 text-xs text-[var(--rbx-dim)]">
+        No registry yet. Run <code className="text-[var(--rbx-text)]">npx tsx bridge/pull-registry.ts</code>
       </p>
     );
   }
@@ -42,7 +42,7 @@ export function StoreMap({
   const cell = Math.max(2, sx(minX + 2) - sx(minX));
 
   return (
-    <div className="rounded border border-neutral-800 bg-[#141416] p-3">
+    <div className="rbx-inset p-3">
       <svg viewBox={`0 0 ${width} ${height}`} className="w-full" role="img">
         {heatmap.map((h, i) => (
           <rect
@@ -62,7 +62,7 @@ export function StoreMap({
           y={sz(SPAWN.z) + 4}
           fill="#4ade80"
           fontSize={9}
-          fontFamily="monospace"
+          fontFamily="inherit"
         >
           SPAWN
         </text>
@@ -88,7 +88,7 @@ export function StoreMap({
                 textAnchor="middle"
                 fill={dim ? "#52525b" : "#e4e4e7"}
                 fontSize={9}
-                fontFamily="monospace"
+                fontFamily="inherit"
               >
                 {slot.trafficRank}
               </text>
@@ -98,7 +98,7 @@ export function StoreMap({
                 textAnchor="middle"
                 fill="#71717a"
                 fontSize={8}
-                fontFamily="monospace"
+                fontFamily="inherit"
               >
                 {slot.slotId}
               </text>
@@ -109,7 +109,7 @@ export function StoreMap({
                   textAnchor="middle"
                   fill="#d4d4d8"
                   fontSize={8}
-                  fontFamily="monospace"
+                  fontFamily="inherit"
                 >
                   {here.title.replace(/^Waterloo /, "")}
                 </text>
@@ -118,7 +118,7 @@ export function StoreMap({
           );
         })}
       </svg>
-      <p className="mt-2 text-[10px] leading-4 text-neutral-600">
+      <p className="mt-2 text-[10px] leading-4 text-[var(--rbx-faint)]">
         Number in each slot is its traffic rank (1 = busiest corridor, 8 = dead corner). Dashed =
         empty. Blue wash is player path density.
       </p>

@@ -61,14 +61,14 @@ export function FunnelTable({ rows }: { rows: ComponentRow[] }) {
   });
 
   if (rows.length === 0) {
-    return <p className="text-xs text-neutral-500">No events yet.</p>;
+    return <p className="text-xs text-[var(--rbx-dim)]">No events yet.</p>;
   }
 
   return (
-    <div className="overflow-x-auto rounded border border-neutral-800">
+    <div className="overflow-x-auto rbx-inset">
       <table className="w-full border-collapse text-xs">
         <thead>
-          <tr className="bg-[#17171a] text-left text-neutral-500">
+          <tr className="bg-[var(--rbx-overlay)] text-left text-[var(--rbx-dim)]">
             {COLUMNS.map((col) => (
               <th
                 key={String(col.key)}
@@ -80,10 +80,10 @@ export function FunnelTable({ rows }: { rows: ComponentRow[] }) {
                     setAsc(false);
                   }
                 }}
-                className="cursor-pointer whitespace-nowrap px-2 py-2 font-normal tracking-wider hover:text-neutral-200"
+                className="cursor-pointer whitespace-nowrap px-2 py-2 font-normal tracking-wider hover:text-[var(--rbx-text)]"
               >
                 {col.label}
-                {sortKey === col.key && <span className="text-neutral-600">{asc ? " ^" : " v"}</span>}
+                {sortKey === col.key && <span className="text-[var(--rbx-faint)]">{asc ? " ^" : " v"}</span>}
               </th>
             ))}
           </tr>
@@ -94,7 +94,7 @@ export function FunnelTable({ rows }: { rows: ComponentRow[] }) {
             const weakSightline = row.sightlineRate !== null && row.sightlineRate < 0.45;
             const starved = row.impressions < 120;
             return (
-              <tr key={row.componentId} className="border-t border-neutral-800/70">
+              <tr key={row.componentId} className="border-t border-[var(--rbx-line)]">
                 {COLUMNS.map((col) => {
                   const raw = col.format ? col.format(row) : row[col.key];
                   const value =
@@ -106,7 +106,7 @@ export function FunnelTable({ rows }: { rows: ComponentRow[] }) {
                     <td
                       key={String(col.key)}
                       className={`whitespace-nowrap px-2 py-2 ${
-                        col.key === "title" ? "text-neutral-200" : "text-neutral-400"
+                        col.key === "title" ? "text-[var(--rbx-text)]" : "text-[var(--rbx-dim)]"
                       } ${highlight ? "bg-amber-500/10 text-amber-300" : ""}`}
                     >
                       {value}
@@ -118,7 +118,7 @@ export function FunnelTable({ rows }: { rows: ComponentRow[] }) {
           })}
         </tbody>
       </table>
-      <p className="px-2 py-2 text-[10px] text-neutral-600">
+      <p className="px-2 py-2 text-[10px] text-[var(--rbx-faint)]">
         Amber = starved of impressions, or seen but not approached. Hover a header for what the
         column means.
       </p>

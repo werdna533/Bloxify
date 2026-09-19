@@ -157,12 +157,18 @@ export function sourceBreakdown(experimentId: string | null) {
     .all({ experimentId }) as { source: string; events: number; sessions: number }[];
 }
 
+/**
+ * Chronological, not alphabetical. "exp_baseline" sorts after "exp_03" by name,
+ * which would default a before/after comparison to running backwards.
+ */
 export function experimentIds(): string[] {
   return (
     db()
       .prepare(
-        `SELECT DISTINCT experiment_id AS id FROM events
-         WHERE experiment_id IS NOT NULL ORDER BY id`,
+        `SELECT experiment_id AS id, MIN(ts) AS firstSeen FROM events
+         WHERE experiment_id IS NOT NULL
+         GROUP BY experiment_id
+         ORDER BY firstSeen ASC`,
       )
       .all() as { id: string }[]
   ).map((r) => r.id);

@@ -147,7 +147,7 @@ function labelSprite(text: string, colour: string): THREE.Sprite {
   ctx.strokeStyle = colour;
   ctx.lineWidth = 6;
   ctx.strokeRect(3, 3, 506, 122);
-  ctx.font = "bold 46px ui-monospace, monospace";
+  ctx.font = 'bold 46px "Builder Sans", Inter, system-ui, sans-serif';
   ctx.fillStyle = "#f4f4f5";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -160,7 +160,13 @@ function labelSprite(text: string, colour: string): THREE.Sprite {
   return sprite;
 }
 
-export function StoreHeat3D({ source }: { source: string }) {
+export function StoreHeat3D({
+  source,
+  experimentId,
+}: {
+  source: string;
+  experimentId: string | null;
+}) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [geometry, setGeometry] = useState<Geometry | null>(null);
   const [heat, setHeat] = useState<HeatData | null>(null);
@@ -174,9 +180,11 @@ export function StoreHeat3D({ source }: { source: string }) {
     let cancelled = false;
     (async () => {
       try {
+        const query = new URLSearchParams({ source });
+        if (experimentId) query.set("experimentId", experimentId);
         const [g, h] = await Promise.all([
           fetch("/api/geometry", { cache: "no-store" }),
-          fetch(`/api/heatmap?source=${source}`, { cache: "no-store" }),
+          fetch(`/api/heatmap?${query}`, { cache: "no-store" }),
         ]);
         if (!g.ok) throw new Error("no geometry — run bridge/export-geometry.ts");
         if (!h.ok) throw new Error(`heatmap HTTP ${h.status}`);
@@ -191,7 +199,7 @@ export function StoreHeat3D({ source }: { source: string }) {
     return () => {
       cancelled = true;
     };
-  }, [source]);
+  }, [source, experimentId]);
 
   const layerHint = useMemo(
     () => FLOOR_LAYERS.find((l) => l.key === layer)?.hint ?? "",
@@ -206,8 +214,8 @@ export function StoreHeat3D({ source }: { source: string }) {
     const height = mount.clientHeight;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0c0c0f);
-    scene.fog = new THREE.Fog(0x0c0c0f, 180, 420);
+    scene.background = new THREE.Color(0x121215);
+    scene.fog = new THREE.Fog(0x121215, 180, 420);
 
     const camera = new THREE.PerspectiveCamera(50, width / height, 0.5, 2000);
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -407,14 +415,14 @@ export function StoreHeat3D({ source }: { source: string }) {
 
   if (error) {
     return (
-      <div className="rounded border border-neutral-800 bg-[#141416] p-4 text-xs text-red-400">
+      <div className="rbx-inset p-4 text-xs text-red-400">
         {error}
       </div>
     );
   }
 
   return (
-    <div className="rounded border border-neutral-800 bg-[#141416] p-3">
+    <div className="rbx-inset p-3">
       <div className="mb-3 flex flex-wrap items-center gap-2 text-[10px]">
         {FLOOR_LAYERS.map((l) => (
           <button
@@ -423,7 +431,7 @@ export function StoreHeat3D({ source }: { source: string }) {
             className={`rounded px-2 py-1 tracking-wider ${
               layer === l.key
                 ? "bg-neutral-200 text-neutral-900"
-                : "border border-neutral-700 text-neutral-400 hover:bg-neutral-800"
+                : "border border-[var(--rbx-line)] text-[var(--rbx-dim)] hover:bg-[var(--rbx-overlay-strong)]"
             }`}
           >
             {l.label}
@@ -435,16 +443,16 @@ export function StoreHeat3D({ source }: { source: string }) {
         </span>
       </div>
 
-      <div className="relative h-[520px] w-full overflow-hidden rounded bg-[#0c0c0f]">
+      <div className="relative h-[520px] w-full overflow-hidden rounded bg-[#121215]">
         <div ref={mountRef} className="h-full w-full" />
         {(!geometry || !heat) && (
-          <div className="pointer-events-none absolute inset-0 grid place-items-center text-xs text-neutral-600">
+          <div className="pointer-events-none absolute inset-0 grid place-items-center text-xs text-[var(--rbx-faint)]">
             loading store geometry and heat data…
           </div>
         )}
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-[10px] text-neutral-500">
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-[10px] text-[var(--rbx-dim)]">
         <span>{layerHint} · drag to orbit, scroll to zoom, click a pillar</span>
         <span className="flex gap-3">
           <Legend colour="#ef4444" label="hotspot" />
@@ -455,14 +463,14 @@ export function StoreHeat3D({ source }: { source: string }) {
       </div>
 
       {selected && (
-        <div className="mt-3 rounded border border-neutral-800 bg-[#0f0f11] p-3 text-xs">
+        <div className="rbx-inset mt-3 p-3 text-xs">
           <div className="flex items-baseline justify-between">
-            <span className="text-neutral-200">{selected.title}</span>
-            <span className="text-neutral-500">
+            <span className="text-[var(--rbx-text)]">{selected.title}</span>
+            <span className="text-[var(--rbx-dim)]">
               {selected.slotId} · {selected.quadrant.replace(/_/g, " ")}
             </span>
           </div>
-          <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-neutral-400 sm:grid-cols-4">
+          <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-[var(--rbx-dim)] sm:grid-cols-4">
             <Stat label="impressions" value={selected.impressions} />
             <Stat label="approaches" value={selected.approaches} />
             <Stat label="gaze seconds" value={Math.round(selected.gazeSeconds)} />
@@ -490,7 +498,7 @@ function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; labe
     <button
       onClick={onClick}
       className={`rounded px-2 py-1 tracking-wider ${
-        on ? "bg-neutral-700 text-neutral-100" : "border border-neutral-700 text-neutral-500"
+        on ? "bg-neutral-700 text-[var(--rbx-text)]" : "border border-[var(--rbx-line)] text-[var(--rbx-dim)]"
       }`}
     >
       {label}
@@ -510,8 +518,8 @@ function Legend({ colour, label }: { colour: string; label: string }) {
 function Stat({ label, value, hint }: { label: string; value: number | string; hint?: string }) {
   return (
     <div title={hint}>
-      <div className="text-[9px] uppercase tracking-wider text-neutral-600">{label}</div>
-      <div className="text-neutral-200">{value}</div>
+      <div className="text-[9px] uppercase tracking-wider text-[var(--rbx-faint)]">{label}</div>
+      <div className="text-[var(--rbx-text)]">{value}</div>
     </div>
   );
 }

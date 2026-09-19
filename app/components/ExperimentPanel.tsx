@@ -91,15 +91,18 @@ export function ExperimentPanel() {
   const apply = (id: string) => act(id, "apply");
 
   return (
-    <div className="rounded border border-neutral-800 bg-[#141416] p-5">
+    <div className="rbx-card p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-xs tracking-[0.25em] text-neutral-500">EXPERIMENT</h2>
+        <div>
+          <h2 className="text-[15px] font-bold">Run an experiment</h2>
+          <p className="mt-0.5 text-xs text-[var(--rbx-dim)]">The model proposes, the validator decides, the Bridge applies.</p>
+        </div>
         <button
           onClick={analyze}
           disabled={busy === "analyze"}
-          className="rounded bg-neutral-200 px-4 py-1.5 text-xs font-semibold tracking-wider text-neutral-900 hover:bg-white disabled:opacity-40"
+          className="rbx-button"
         >
-          {busy === "analyze" ? "ANALYZING…" : "ANALYZE"}
+          {busy === "analyze" ? "Analyzing…" : "Analyze"}
         </button>
       </div>
 
@@ -111,7 +114,7 @@ export function ExperimentPanel() {
           <Field label="EVIDENCE">
             <ul className="space-y-1">
               {insight.plan.evidence.map((e, i) => (
-                <li key={i} className="text-neutral-400">
+                <li key={i} className="text-[var(--rbx-dim)]">
                   &bull; {e}
                 </li>
               ))}
@@ -122,7 +125,7 @@ export function ExperimentPanel() {
               <span className="uppercase">{insight.plan.confidence}</span>
             </Field>
             <Field label="MODEL">
-              <span className="text-neutral-500">{insight.model}</span>
+              <span className="text-[var(--rbx-dim)]">{insight.model}</span>
             </Field>
           </div>
           <Field label="EXPECTED EFFECT">{insight.plan.expectedEffect}</Field>
@@ -137,12 +140,12 @@ export function ExperimentPanel() {
               {insight.validation.rejected.map((r, i) => (
                 <li key={`r${i}`} className="text-red-400">
                   &#10007; {describeOp(r.op)}
-                  <span className="text-neutral-500"> — validator refused: {r.reason}</span>
+                  <span className="text-[var(--rbx-dim)]"> — validator refused: {r.reason}</span>
                 </li>
               ))}
             </ul>
             {insight.validation.rejected.length > 0 && (
-              <p className="mt-2 text-[10px] text-neutral-500">
+              <p className="mt-2 text-[10px] text-[var(--rbx-dim)]">
                 Rejected operations are never sent to Roblox.
               </p>
             )}
@@ -152,17 +155,17 @@ export function ExperimentPanel() {
             <button
               onClick={save}
               disabled={busy !== null || insight.validation.accepted.length === 0 || savedId !== null}
-              className="rounded border border-neutral-600 px-3 py-1.5 text-xs tracking-wider text-neutral-200 hover:bg-neutral-800 disabled:opacity-40"
+              className="rbx-button-secondary"
             >
-              {savedId ? `SAVED AS ${savedId}` : "SAVE AS EXPERIMENT"}
+              {savedId ? `Saved as ${savedId}` : "Save as experiment"}
             </button>
             {savedId && (
               <button
                 onClick={() => apply(savedId)}
                 disabled={busy !== null}
-                className="rounded bg-emerald-500 px-4 py-1.5 text-xs font-semibold tracking-wider text-neutral-950 hover:bg-emerald-400 disabled:opacity-40"
+                className="rbx-button"
               >
-                APPLY TO ROBLOX
+                Apply to Roblox
               </button>
             )}
           </div>
@@ -170,31 +173,31 @@ export function ExperimentPanel() {
       )}
 
       {experiments.length > 0 && (
-        <div className="mt-7 border-t border-neutral-800 pt-4">
-          <h3 className="mb-3 text-[10px] tracking-[0.25em] text-neutral-600">LOG</h3>
+        <div className="mt-7 border-t border-[var(--rbx-line)] pt-4">
+          <h3 className="rbx-label mb-3">HISTORY</h3>
           <ul className="space-y-2 text-xs">
             {experiments.map((e) => (
               <li key={e.id} className="flex flex-wrap items-center gap-3">
-                <span className="text-neutral-300">{e.id}</span>
+                <span className="text-[var(--rbx-text)]">{e.id}</span>
                 <StatusPill status={e.status} />
-                <span className="min-w-0 flex-1 truncate text-neutral-500">{e.hypothesis}</span>
+                <span className="min-w-0 flex-1 truncate text-[var(--rbx-dim)]">{e.hypothesis}</span>
                 {(e.status === "draft" || e.status === "failed") && (
                   <button
                     onClick={() => apply(e.id)}
                     disabled={busy !== null}
-                    className="rounded border border-neutral-700 px-2 py-1 text-[10px] tracking-wider hover:bg-neutral-800"
+                    className="rounded-[6px] px-2 py-1 text-[10px] font-semibold" style={{ background: "var(--rbx-overlay-strong)" }}
                   >
-                    APPLY
+                    Apply
                   </button>
                 )}
                 {e.snapshot_before_json && e.status !== "rolling_back" && (
                   <button
                     onClick={() => act(e.id, "rollback")}
                     disabled={busy !== null}
-                    className="rounded border border-amber-700/70 px-2 py-1 text-[10px] tracking-wider text-amber-300 hover:bg-amber-900/30"
+                    className="rounded-[6px] px-2 py-1 text-[10px] font-semibold text-amber-300" style={{ background: "rgba(245,158,11,0.14)" }}
                     title="Restore the snapshot taken before this apply"
                   >
-                    ROLL BACK
+                    Roll back
                   </button>
                 )}
                 {e.error && <span className="text-red-400">{e.error}</span>}
@@ -216,12 +219,12 @@ function StatusPill({ status }: { status: string }) {
         ? "bg-red-500/20 text-red-300"
         : status === "applying"
           ? "bg-amber-500/20 text-amber-300"
-          : "bg-neutral-700/40 text-neutral-400";
+          : "bg-neutral-700/40 text-[var(--rbx-dim)]";
   return (
     <span className={`rounded px-2 py-0.5 text-[10px] tracking-wider ${colour}`}>
       {status.toUpperCase()}
       {index >= 0 && status !== "done" && (
-        <span className="text-neutral-600"> {index + 1}/{STAGES.length}</span>
+        <span className="text-[var(--rbx-faint)]"> {index + 1}/{STAGES.length}</span>
       )}
     </span>
   );
@@ -230,8 +233,8 @@ function StatusPill({ status }: { status: string }) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="mb-1 text-[10px] tracking-[0.2em] text-neutral-600">{label}</div>
-      <div className="text-neutral-200">{children}</div>
+      <div className="rbx-label mb-1">{label}</div>
+      <div className="text-[var(--rbx-text)]">{children}</div>
     </div>
   );
 }
