@@ -1,6 +1,10 @@
 .env.local
 node_modules/
 .next/
+data/
+*.db
+*.db-wal
+*.db-shm
 *.rbxl
 *.rbxlx
 BUILD_SPEC.md
