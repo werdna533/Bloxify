@@ -27,16 +27,12 @@ function Telemetry.push(sessionId: string, event: { [string]: any })
 	table.insert(queue, { sessionId = sessionId, event = event })
 end
 
-local function send(sessionId: string, events: { { [string]: any } })
-	local payload = {
-		sessionId = sessionId,
-		placeVersion = Config.PLACE_VERSION,
-		experimentId = experimentId(),
-		source = "live",
-		events = events,
-	}
+local backoffUntil = 0
 
-	-- A dead backend must never break the game during a demo.
+-- One request carries every session. Sending per player would cost roughly
+-- 20 requests/minute each, and HttpService allows about 500/minute for the
+-- whole server, so a full lobby would be throttled within seconds.
+local function send(batch: { { [string]: any } })
 	local ok, err = pcall(function()
 		local res = HttpService:RequestAsync({
 			Url = Config.BASE_URL .. "/api/events",
@@ -45,20 +41,30 @@ local function send(sessionId: string, events: { { [string]: any } })
 				["Content-Type"] = "application/json",
 				["Authorization"] = "Bearer " .. Config.AUTH_TOKEN,
 			},
-			Body = HttpService:JSONEncode(payload),
+			Body = HttpService:JSONEncode({ batch = batch }),
 		})
 		if not res.Success then
 			warn(string.format("[telemetry] backend replied %d: %s", res.StatusCode, tostring(res.Body)))
+			-- Throttled or server-side trouble: stop hammering it for a bit.
+			if res.StatusCode == 429 or res.StatusCode >= 500 then
+				backoffUntil = os.clock() + 15
+			end
 		end
 	end)
 	if not ok then
+		-- A dead backend must never break the game during a demo.
 		warn("[telemetry] send failed:", err)
+		backoffUntil = os.clock() + 15
 	end
 end
 
 function Telemetry.flush()
 	if #queue == 0 then
 		lastFlush = os.clock()
+		return
+	end
+	if os.clock() < backoffUntil then
+		-- Still backing off. Leave the queue alone; MAX_QUEUE caps the damage.
 		return
 	end
 
@@ -74,9 +80,19 @@ function Telemetry.flush()
 	queue = {}
 	lastFlush = os.clock()
 
+	local batch = {}
+	local currentExperiment = experimentId()
 	for sessionId, events in pairs(bySession) do
-		task.spawn(send, sessionId, events)
+		table.insert(batch, {
+			sessionId = sessionId,
+			placeVersion = Config.PLACE_VERSION,
+			experimentId = currentExperiment,
+			source = "live",
+			events = events,
+		})
 	end
+
+	task.spawn(send, batch)
 end
 
 function Telemetry.maybeFlush()

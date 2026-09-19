@@ -20,9 +20,9 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local SNAPSHOT_NAME = "CommerceLabLastSnapshot"
 
 local toolbar = plugin:CreateToolbar("Commerce Lab")
-local fetchButton = toolbar:CreateButton("Fetch + Apply", "Pull the queued plan from the backend and apply it", "rbxasset://textures/ui/common/play.png")
-local pasteButton = toolbar:CreateButton("Apply Pasted", "Apply ServerStorage.PendingPlan without any network", "rbxasset://textures/ui/common/play.png")
-local rollbackButton = toolbar:CreateButton("Roll Back", "Restore the snapshot taken before the last apply", "rbxasset://textures/ui/common/reset.png")
+local fetchButton = toolbar:CreateButton("Fetch + Apply", "Pull the queued plan from the backend and apply it", "")
+local pasteButton = toolbar:CreateButton("Apply Pasted", "Apply ServerStorage.PendingPlan without any network", "")
+local rollbackButton = toolbar:CreateButton("Roll Back", "Restore the snapshot taken before the last apply", "")
 
 local function api()
 	local storefront = ServerScriptService:FindFirstChild("Storefront")

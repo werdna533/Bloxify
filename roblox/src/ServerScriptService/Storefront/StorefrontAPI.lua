@@ -3,8 +3,28 @@
 -- of named operations and this module decides whether each one is legal.
 
 local CollectionService = game:GetService("CollectionService")
-local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+
+-- Undo recording is a Studio-only facility. This module is only ever driven
+-- from Edit mode, but it lives in ServerScriptService and would be loadable on
+-- a live server, so guard it rather than letting a require blow up there.
+local ChangeHistoryService = RunService:IsStudio() and game:GetService("ChangeHistoryService") or nil
+
+local function beginRecording(name: string): any
+	if not ChangeHistoryService then return nil end
+	local ok, recording = pcall(function()
+		return ChangeHistoryService:TryBeginRecording(name)
+	end)
+	return ok and recording or nil
+end
+
+local function finishRecording(recording: any)
+	if not ChangeHistoryService or not recording then return end
+	pcall(function()
+		ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+	end)
+end
 
 local ComponentLibrary = require(script.Parent.ComponentLibrary)
 
@@ -293,7 +313,7 @@ function StorefrontAPI.restore(json: string): string
 	end
 
 	local restored, errors = {}, {}
-	local recording = ChangeHistoryService:TryBeginRecording("Storefront restore")
+	local recording = beginRecording("Storefront restore")
 
 	for _, entry in ipairs(decoded.components or {}) do
 		local model = findComponent(entry.componentId)
@@ -326,7 +346,7 @@ function StorefrontAPI.restore(json: string): string
 	if decoded.experimentId then
 		workspace:SetAttribute("ExperimentId", decoded.experimentId)
 	end
-	if recording then ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit) end
+	finishRecording(recording)
 
 	return HttpService:JSONEncode({ ok = #errors == 0, restored = restored, errors = errors })
 end
@@ -351,7 +371,7 @@ function StorefrontAPI.apply(planJson: string): string
 	end
 
 	local applied, rejected, errors = {}, {}, {}
-	local recording = ChangeHistoryService:TryBeginRecording("Storefront apply")
+	local recording = beginRecording("Storefront apply")
 
 	for index, op in ipairs(list) do
 		local handler = ops[tostring(op.op)]
@@ -374,7 +394,7 @@ function StorefrontAPI.apply(planJson: string): string
 	if plan.experimentId then
 		workspace:SetAttribute("ExperimentId", plan.experimentId)
 	end
-	if recording then ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit) end
+	finishRecording(recording)
 
 	return HttpService:JSONEncode({
 		ok = #rejected == 0,

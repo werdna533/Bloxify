@@ -61,6 +61,11 @@ function clampMeta(meta: Record<string, unknown> | undefined) {
   return JSON.stringify(out);
 }
 
+// A busy live server has many players flushing at once. One request per player
+// would blow through HttpService's ~500/min per-server budget, so the game
+// packs every session's events into a single request.
+const batchSchema = z.object({ batch: z.array(envelopeSchema).max(120) });
+
 export async function POST(request: Request) {
   const auth = requireAuth(request);
   if (!auth.ok) return auth.response;
@@ -72,30 +77,18 @@ export async function POST(request: Request) {
     return Response.json({ error: "invalid json" }, { status: 400 });
   }
 
-  const parsed = envelopeSchema.safeParse(body);
-  if (!parsed.success) {
-    console.error("[events] rejected envelope:", JSON.stringify(parsed.error.issues).slice(0, 500));
-    return Response.json({ error: "invalid envelope", issues: parsed.error.issues }, { status: 400 });
-  }
+  const asBatch = batchSchema.safeParse(body);
+  const envelopes: z.infer<typeof envelopeSchema>[] = [];
 
-  const { sessionId, placeVersion, experimentId } = parsed.data;
-  const source = parsed.data.source ?? "live";
-
-  // Validate per event. One malformed event must never discard the batch it
-  // travelled in — that silently loses everything a player just did.
-  const events: z.infer<typeof eventSchema>[] = [];
-  const rejected: { index: number; reason: string }[] = [];
-  parsed.data.events.forEach((raw, index) => {
-    const event = eventSchema.safeParse(raw);
-    if (event.success) events.push(event.data);
-    else rejected.push({ index, reason: event.error.issues.map((i) => i.message).join("; ") });
-  });
-
-  if (rejected.length > 0) {
-    console.error(`[events] dropped ${rejected.length} malformed event(s):`, JSON.stringify(rejected).slice(0, 400));
-  }
-  if (events.length === 0) {
-    return Response.json({ ok: false, accepted: 0, rejected }, { status: 400 });
+  if (asBatch.success) {
+    envelopes.push(...asBatch.data.batch);
+  } else {
+    const single = envelopeSchema.safeParse(body);
+    if (!single.success) {
+      console.error("[events] rejected envelope:", JSON.stringify(single.error.issues).slice(0, 500));
+      return Response.json({ error: "invalid envelope", issues: single.error.issues }, { status: 400 });
+    }
+    envelopes.push(single.data);
   }
 
   const handle = db();
@@ -107,9 +100,7 @@ export async function POST(request: Request) {
       experiment_id = COALESCE(excluded.experiment_id, sessions.experiment_id),
       place_version = COALESCE(excluded.place_version, sessions.place_version)
   `);
-
   const endSession = handle.prepare(`UPDATE sessions SET ended_at = ? WHERE id = ?`);
-
   const insertEvent = handle.prepare(`
     INSERT INTO events (session_id, ts, type, surface, component_id, product_id,
                         x, y, z, lx, ly, lz, meta_json, experiment_id, source)
@@ -117,36 +108,59 @@ export async function POST(request: Request) {
             @x, @y, @z, @lx, @ly, @lz, @metaJson, @experimentId, @source)
   `);
 
-  const earliest = events.reduce((min, e) => Math.min(min, e.t), Number.POSITIVE_INFINITY);
+  let accepted = 0;
+  const rejected: { session: string; index: number; reason: string }[] = [];
 
   const write = handle.transaction(() => {
-    upsertSession.run({
-      id: sessionId,
-      startedAt: Number.isFinite(earliest) ? earliest : Date.now() / 1000,
-      experimentId: experimentId ?? null,
-      placeVersion: placeVersion ?? null,
-      source,
-    });
+    for (const envelope of envelopes) {
+      const { sessionId, placeVersion, experimentId } = envelope;
+      const source = envelope.source ?? "live";
 
-    for (const event of events) {
-      insertEvent.run({
-        sessionId,
-        ts: event.t,
-        type: event.type,
-        surface: event.surface ?? null,
-        componentId: event.componentId ?? null,
-        productId: event.productId ?? null,
-        x: event.pos?.[0] ?? null,
-        y: event.pos?.[1] ?? null,
-        z: event.pos?.[2] ?? null,
-        lx: event.look?.[0] ?? null,
-        ly: event.look?.[1] ?? null,
-        lz: event.look?.[2] ?? null,
-        metaJson: clampMeta(event.meta),
+      // Validate per event. One malformed event must never discard the batch
+      // it travelled in — that silently loses everything a player just did.
+      const events: z.infer<typeof eventSchema>[] = [];
+      envelope.events.forEach((raw, index) => {
+        const event = eventSchema.safeParse(raw);
+        if (event.success) events.push(event.data);
+        else
+          rejected.push({
+            session: sessionId,
+            index,
+            reason: event.error.issues.map((i) => i.message).join("; "),
+          });
+      });
+      if (events.length === 0) continue;
+
+      const earliest = events.reduce((min, e) => Math.min(min, e.t), Number.POSITIVE_INFINITY);
+      upsertSession.run({
+        id: sessionId,
+        startedAt: Number.isFinite(earliest) ? earliest : Date.now() / 1000,
         experimentId: experimentId ?? null,
+        placeVersion: placeVersion ?? null,
         source,
       });
-      if (event.type === "session_ended") endSession.run(event.t, sessionId);
+
+      for (const event of events) {
+        insertEvent.run({
+          sessionId,
+          ts: event.t,
+          type: event.type,
+          surface: event.surface ?? null,
+          componentId: event.componentId ?? null,
+          productId: event.productId ?? null,
+          x: event.pos?.[0] ?? null,
+          y: event.pos?.[1] ?? null,
+          z: event.pos?.[2] ?? null,
+          lx: event.look?.[0] ?? null,
+          ly: event.look?.[1] ?? null,
+          lz: event.look?.[2] ?? null,
+          metaJson: clampMeta(event.meta),
+          experimentId: experimentId ?? null,
+          source,
+        });
+        if (event.type === "session_ended") endSession.run(event.t, sessionId);
+      }
+      accepted += events.length;
     }
   });
 
@@ -157,9 +171,17 @@ export async function POST(request: Request) {
     return Response.json({ error: "write failed" }, { status: 500 });
   }
 
+  if (rejected.length > 0) {
+    console.error(`[events] dropped ${rejected.length} malformed event(s):`, JSON.stringify(rejected).slice(0, 400));
+  }
+  if (accepted === 0) {
+    return Response.json({ ok: false, accepted: 0, rejected }, { status: 400 });
+  }
+
   return Response.json({
     ok: true,
-    accepted: events.length,
+    accepted,
+    sessions: envelopes.length,
     ...(rejected.length > 0 ? { rejected } : {}),
   });
 }

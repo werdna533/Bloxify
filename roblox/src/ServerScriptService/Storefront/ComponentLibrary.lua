@@ -166,6 +166,14 @@ function ComponentLibrary.build(spec: { [string]: any }): Model
 	model.Name = spec.componentId
 	model.PrimaryPart = root
 
+	-- This place has StreamingEnabled, so by default a display more than a few
+	-- hundred studs away would not exist on the client at all — and the client
+	-- is what computes impressions and gaze. A display we cannot see from
+	-- across the room would silently record nothing, which is exactly the
+	-- measurement this project exists to make. Persistent keeps all five on
+	-- every client for the whole session.
+	model.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
+
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "InspectPrompt"
 	prompt.ActionText = spec.ctaText or "View"
