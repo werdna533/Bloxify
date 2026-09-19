@@ -167,6 +167,40 @@ does not need its source inlined into every call.
 
 ## BLOCKED — needs you
 
+### Shopify app is missing two permission scopes (2 minutes to fix)
+
+This is the only thing standing between you and working Roblox→Shopify
+attribution. Everything around it is built and tested.
+
+The custom app's token currently grants only:
+`write_products, read_products, write_metaobjects, read_metaobjects,
+write_metaobject_definitions, read_metaobject_definitions`.
+
+It needs two more:
+
+| Scope | What it unblocks |
+|---|---|
+| `write_discounts` | Minting the single-use claim code per session. Without it `POST /api/claim` returns "missing_scope" and the game can only show a plain store link. |
+| `read_orders` | Registering and receiving the `orders/create` webhook. |
+
+**How to fix:** Shopify admin → Settings → Apps and sales channels → Develop
+apps → your app → Configuration → Admin API integration → Edit → tick
+`write_discounts` and `read_orders` → Save → Install/Update the app. The
+`shpat_` token does not change, so nothing in `.env.local` needs editing.
+
+Verified working already, so no code should need touching afterwards:
+- Product import: all 5 products pull from Shopify and map onto the right
+  display (`GET /api/products`).
+- Webhook signature checking: a bad HMAC is rejected with 401, a correctly
+  signed payload is accepted.
+- Attribution logic: a signed `orders/create` payload carrying a claim code
+  was matched to its session and written to the orders table. I then deleted
+  that test row so it cannot show up as a real purchase.
+
+Still to do once the scopes exist: register the webhook against the tunnel URL,
+and wire the in-game panel to request a code on CTA click (the server-side
+call is written, the panel currently just shows the CTA confirmation text).
+
 ### Studio's 3D viewport renders blank, so screenshots are unusable
 
 `screen_capture` returns a white image with only the 2D GUI layer drawn (the
