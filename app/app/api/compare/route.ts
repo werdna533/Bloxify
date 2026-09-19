@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { componentMetrics, type ComponentMetrics, type SourceFilter } from "@/lib/metrics";
 import { readRegistry } from "@/app/api/registry/route";
+import { env } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,6 +35,14 @@ export async function GET(request: Request) {
     return Response.json({ error: "before and after experiment ids are required" }, { status: 400 });
   }
 
+  if (env.workerUrl) {
+    const response = await fetch(`${env.workerUrl}/compare${url.search}`, {
+      headers: { Authorization: `Bearer ${env.backendAuthToken}` },
+      cache: "no-store",
+    });
+    return Response.json(await response.json(), { status: response.status });
+  }
+
   const beforeMetrics = new Map(componentMetrics(before, source).map((m) => [m.componentId, m]));
   const afterMetrics = new Map(componentMetrics(after, source).map((m) => [m.componentId, m]));
 
@@ -53,7 +62,7 @@ export async function GET(request: Request) {
   const afterSessions = Math.max(1, sessionsOf(after));
 
   const componentIds = new Set([...beforeMetrics.keys(), ...afterMetrics.keys()]);
-  const registry = readRegistry();
+  const registry = await readRegistry();
   const titleOf = new Map(registry?.components.map((c) => [c.componentId, c.title]) ?? []);
 
   const RATE_KEYS = new Set(["sightlineRate", "engagementRate", "intentRate"]);

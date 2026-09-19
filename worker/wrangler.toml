@@ -1,0 +1,24 @@
+name = "htn-lab"
+main = "src/index.ts"
+compatibility_date = "2026-09-19"
+
+# database_id is filled in by `wrangler d1 create htn-lab`.
+# `wrangler dev --local` ignores it and uses a local simulated D1.
+[[d1_databases]]
+database_name = "htn-lab"
+binding = "DB"
+database_id = "64c01bce-c821-4a16-9a78-8e091c78b1e2"
+
+[[durable_objects.bindings]]
+name = "EXPERIMENT_RUN"
+class_name = "ExperimentRun"
+
+# SQLite-backed DOs; required on the free plan.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ExperimentRun"]
+
+# Before/after screen captures pulled back from Studio.
+[[r2_buckets]]
+binding = "SHOTS"
+bucket_name = "htn-lab-shots"

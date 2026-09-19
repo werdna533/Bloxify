@@ -3,6 +3,7 @@ import { componentMetrics } from "@/lib/metrics";
 import { readRegistry } from "@/app/api/registry/route";
 import { proposePlan } from "@/lib/ai";
 import { validatePlan } from "@/lib/validate";
+import { env } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +15,7 @@ export async function POST(request: Request) {
     source?: "sim" | "live" | "all";
   };
 
-  const registry = readRegistry();
+  const registry = await readRegistry();
   if (!registry) {
     return Response.json(
       { error: "no registry — run `npx tsx bridge/pull-registry.ts` first" },
@@ -23,7 +24,7 @@ export async function POST(request: Request) {
   }
 
   const source = body.source ?? "all";
-  const metrics = componentMetrics(body.experimentId ?? null, source);
+  const metrics = await getComponentMetrics(body.experimentId ?? null, source);
   if (metrics.length === 0) {
     return Response.json({ error: "no metrics yet — seed or collect some sessions" }, { status: 400 });
   }
@@ -79,9 +80,29 @@ export async function POST(request: Request) {
         approachConcordance: m?.approachConcordance ?? null,
       };
     }),
-    previousExperiments: previousExperiments(),
+    previousExperiments: await getPreviousExperiments(),
     dataProvenance: source,
   };
+
+  if (env.workerUrl) {
+    const response = await fetch(`${env.workerUrl}/plan`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${env.backendAuthToken}`,
+      },
+      body: JSON.stringify({ context, registry }),
+      cache: "no-store",
+    });
+    const workerBody = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return Response.json(workerBody, { status: response.status });
+    }
+    return Response.json({
+      ...workerBody,
+      context: { components: context.components.length, metrics: context.metrics.length },
+    });
+  }
 
   const result = await proposePlan(context);
   if (!result.ok) {
@@ -98,18 +119,47 @@ export async function POST(request: Request) {
   });
 }
 
-function previousExperiments() {
-  const rows = db()
-    .prepare(
-      `SELECT id, hypothesis, plan_json, result_json, status
-       FROM experiments WHERE status IN ('applied', 'done') ORDER BY created_at DESC LIMIT 5`,
-    )
-    .all() as {
-    id: string;
-    hypothesis: string | null;
-    plan_json: string | null;
-    status: string;
-  }[];
+/**
+ * Metrics behind the Worker when configured, so this reasons about the same
+ * experiments table the dashboard's compare view reads — not a local copy
+ * that writes stopped landing in once /api/experiments moved to D1.
+ */
+async function getComponentMetrics(experimentId: string | null, source: "sim" | "live" | "all") {
+  if (env.workerUrl) {
+    const query = new URLSearchParams({ source });
+    if (experimentId) query.set("experimentId", experimentId);
+    const res = await fetch(`${env.workerUrl}/analytics?${query}`, {
+      headers: { Authorization: `Bearer ${env.backendAuthToken}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { components: ReturnType<typeof componentMetrics> };
+    return data.components;
+  }
+  return componentMetrics(experimentId, source);
+}
+
+async function getPreviousExperiments() {
+  type Row = { id: string; hypothesis: string | null; plan_json: string | null; status: string };
+
+  let rows: Row[];
+  if (env.workerUrl) {
+    const res = await fetch(`${env.workerUrl}/experiments`, {
+      headers: { Authorization: `Bearer ${env.backendAuthToken}` },
+      cache: "no-store",
+    });
+    const data = (await res.json().catch(() => ({ experiments: [] }))) as { experiments: Row[] };
+    rows = (data.experiments ?? [])
+      .filter((r) => r.status === "applied" || r.status === "done")
+      .slice(0, 5);
+  } else {
+    rows = db()
+      .prepare(
+        `SELECT id, hypothesis, plan_json, result_json, status
+         FROM experiments WHERE status IN ('applied', 'done') ORDER BY created_at DESC LIMIT 5`,
+      )
+      .all() as Row[];
+  }
 
   return rows.map((r) => ({
     id: r.id,

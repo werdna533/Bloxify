@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireAuth } from "@/lib/env";
+import { env, requireAuth } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -75,6 +75,15 @@ export async function POST(request: Request) {
     body = await request.json();
   } catch {
     return Response.json({ error: "invalid json" }, { status: 400 });
+  }
+
+  if (env.workerUrl) {
+    const response = await fetch(`${env.workerUrl}/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.backendAuthToken}` },
+      body: JSON.stringify(body),
+    });
+    return Response.json(await response.json(), { status: response.status });
   }
 
   const asBatch = batchSchema.safeParse(body);

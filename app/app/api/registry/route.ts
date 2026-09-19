@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { requireAuth } from "@/lib/env";
+import { env, requireAuth } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,7 +31,22 @@ export type Registry = {
   place?: { name: string; placeId: number; gameId: number };
 };
 
-export function readRegistry(): (Registry & { updatedAt: number }) | null {
+/**
+ * Single source of truth for the live registry, used both by this route's GET
+ * and by every other server route that needs it (insights, products). Reads
+ * the Worker/D1 when configured so nothing reads a stale local copy once
+ * writes have moved there.
+ */
+export async function readRegistry(): Promise<(Registry & { updatedAt: number }) | null> {
+  if (env.workerUrl) {
+    const res = await fetch(`${env.workerUrl}/registry`, {
+      headers: { Authorization: `Bearer ${env.backendAuthToken}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as Registry & { updatedAt: number };
+  }
+
   const row = db().prepare(`SELECT value, updated_at FROM kv WHERE key = 'registry'`).get() as
     | { value: string; updated_at: number }
     | undefined;
@@ -40,7 +55,7 @@ export function readRegistry(): (Registry & { updatedAt: number }) | null {
 }
 
 export async function GET() {
-  const registry = readRegistry();
+  const registry = await readRegistry();
   if (!registry) {
     return Response.json(
       { error: "no registry yet — run `npx tsx bridge/pull-registry.ts` to pull it from Studio" },
@@ -57,6 +72,15 @@ export async function POST(request: Request) {
   const body = (await request.json()) as Registry;
   if (!Array.isArray(body?.slots) || !Array.isArray(body?.components)) {
     return Response.json({ error: "expected { slots, components }" }, { status: 400 });
+  }
+
+  if (env.workerUrl) {
+    const response = await fetch(`${env.workerUrl}/registry`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.backendAuthToken}` },
+      body: JSON.stringify(body),
+    });
+    return Response.json(await response.json(), { status: response.status });
   }
 
   db()

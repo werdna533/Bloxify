@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { requireAuth } from "@/lib/env";
+import { env, requireAuth } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,7 +10,14 @@ export type Geometry = {
   spawns: { name: string; p: number[] }[];
 };
 
-export function readGeometry(): Geometry | null {
+export async function readGeometry(): Promise<Geometry | null> {
+  if (env.workerUrl) {
+    const res = await fetch(`${env.workerUrl}/geometry`, {
+      headers: { Authorization: `Bearer ${env.backendAuthToken}` },
+      cache: "no-store",
+    });
+    return res.ok ? ((await res.json()) as Geometry) : null;
+  }
   const row = db().prepare(`SELECT value FROM kv WHERE key = 'geometry'`).get() as
     | { value: string }
     | undefined;
@@ -18,7 +25,7 @@ export function readGeometry(): Geometry | null {
 }
 
 export async function GET() {
-  const geometry = readGeometry();
+  const geometry = await readGeometry();
   if (!geometry) {
     return Response.json(
       { error: "no geometry yet — run `npx tsx bridge/export-geometry.ts`" },
@@ -35,6 +42,15 @@ export async function POST(request: Request) {
   const body = (await request.json()) as Geometry;
   if (!Array.isArray(body?.boxes)) {
     return Response.json({ error: "expected { boxes }" }, { status: 400 });
+  }
+
+  if (env.workerUrl) {
+    const response = await fetch(`${env.workerUrl}/geometry`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.backendAuthToken}` },
+      body: JSON.stringify(body),
+    });
+    return Response.json(await response.json(), { status: response.status });
   }
 
   db()

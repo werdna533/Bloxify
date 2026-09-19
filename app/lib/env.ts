@@ -10,6 +10,7 @@ if (fs.existsSync(rootEnv)) {
 
 export const env = {
   backendAuthToken: process.env.BACKEND_AUTH_TOKEN ?? "",
+  workerUrl: process.env.WORKER_URL?.replace(/\/$/, "") ?? "",
   tunnelUrl: process.env.TUNNEL_URL ?? "",
   shopifyDomain: process.env.SHOPIFY_STORE_DOMAIN ?? "",
   shopifyAdminToken: process.env.SHOPIFY_ADMIN_TOKEN ?? "",

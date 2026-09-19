@@ -18,7 +18,7 @@ export async function GET(request: Request) {
   if (refresh) {
     try {
       const products = await fetchProducts();
-      const registry = readRegistry();
+      const registry = await readRegistry();
       const componentByProduct = new Map(
         registry?.components.map((c) => [c.productId, c.componentId]) ?? [],
       );

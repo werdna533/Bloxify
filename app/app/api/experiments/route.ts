@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { env } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,6 +12,14 @@ export function nextExperimentId(): string {
 }
 
 export async function GET() {
+  if (env.workerUrl) {
+    const response = await fetch(`${env.workerUrl}/experiments`, {
+      headers: { Authorization: `Bearer ${env.backendAuthToken}` },
+      cache: "no-store",
+    });
+    return Response.json(await response.json(), { status: response.status });
+  }
+
   // Deliberately excludes the snapshot and the base64 images: this is polled
   // every couple of seconds and they are large.
   const rows = db()
@@ -32,6 +41,18 @@ export async function POST(request: Request) {
     plan?: Record<string, unknown>;
     validation?: Record<string, unknown>;
   };
+
+  if (env.workerUrl) {
+    const response = await fetch(`${env.workerUrl}/experiments`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${env.backendAuthToken}`,
+      },
+      body: JSON.stringify(body),
+    });
+    return Response.json(await response.json(), { status: response.status });
+  }
 
   if (!body.plan) return Response.json({ error: "plan is required" }, { status: 400 });
 

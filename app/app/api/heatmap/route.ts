@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { componentMetrics, type SourceFilter } from "@/lib/metrics";
 import { readRegistry } from "@/app/api/registry/route";
+import { env } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +23,15 @@ function sourceClause(source: SourceFilter): string {
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
+
+  if (env.workerUrl) {
+    const response = await fetch(`${env.workerUrl}/heatmap${url.search}`, {
+      headers: { Authorization: `Bearer ${env.backendAuthToken}` },
+      cache: "no-store",
+    });
+    return Response.json(await response.json(), { status: response.status });
+  }
+
   const experimentId = url.searchParams.get("experimentId");
   const source = (url.searchParams.get("source") ?? "all") as SourceFilter;
   const expClause = experimentId ? `AND experiment_id = @experimentId` : "";
@@ -96,7 +106,7 @@ export async function GET(request: Request) {
     )
     .all({ experimentId }) as { source: string | null; target: string; n: number }[];
 
-  const registry = readRegistry();
+  const registry = await readRegistry();
   const metrics = componentMetrics(experimentId, source);
   const metricById = new Map(metrics.map((m) => [m.componentId, m]));
 

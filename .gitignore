@@ -16,3 +16,5 @@ app/public/products/
 worker/.dev.vars
 worker/.env
 .dev.vars
+worker/.wrangler/
+worker/node_modules/

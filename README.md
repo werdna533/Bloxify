@@ -184,6 +184,29 @@ cd ../bridge && npx tsx index.ts
 `SHOPIFY_ADMIN_TOKEN`, `SHOPIFY_CLIENT_SECRET`, `OPENAI_API_KEY`,
 `TUNNEL_URL` and `BACKEND_AUTH_TOKEN`. It is gitignored and must stay that way.
 
+To run the agent brain on Cloudflare, add the deployed Worker URL and point the
+Bridge at the same URL:
+
+```dotenv
+WORKER_URL=https://htn-lab.<your-subdomain>.workers.dev
+BRIDGE_TARGET=https://htn-lab.<your-subdomain>.workers.dev
+```
+
+With those values set, Analyze, experiment save/list, Apply, Roll back, and
+Bridge polling use the Worker. Telemetry, analytics, and the dashboard's
+spatial views continue to use the local Next.js app.
+
+From `worker/`, after the Cloudflare resources exist:
+
+```bash
+npx wrangler d1 create htn-lab
+npx wrangler r2 bucket create htn-lab-shots
+npm run migrate:remote
+npx wrangler secret put BACKEND_AUTH_TOKEN
+npx wrangler secret put OPENAI_API_KEY
+npm run deploy
+```
+
 ---
 
 ## Fallback ladder

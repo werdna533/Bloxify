@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { env } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -6,6 +7,14 @@ export const dynamic = "force-dynamic";
 /** Queues a one-call restore from the snapshot taken before this apply. */
 export async function POST(_request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
+
+  if (env.workerUrl) {
+    const response = await fetch(`${env.workerUrl}/experiments/${id}/rollback`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${env.backendAuthToken}` },
+    });
+    return Response.json(await response.json(), { status: response.status });
+  }
 
   const row = db()
     .prepare(`SELECT id, status, snapshot_before_json FROM experiments WHERE id = ?`)
