@@ -166,26 +166,40 @@ local function build(model: Model, openMethod: string, keepSession: boolean?)
 	price.Text = string.format("$%.2f", model:GetAttribute("price") or 0)
 	price.Parent = frame
 
-	-- Placeholder for the product image until real artwork is generated.
+	-- The real listing photo, uploaded from Shopify to a Roblox asset id.
+	-- Falls back to a flat colour when a product has no image yet.
 	local art = Instance.new("Frame")
+	art.Name = "ProductImage"
 	art.Size = UDim2.new(1, -36, 0, 170)
 	art.Position = UDim2.fromOffset(18, 84)
-	art.BackgroundColor3 = model:GetAttribute("garmentColour") or Color3.fromRGB(80, 80, 90)
+	art.BackgroundColor3 = Color3.fromRGB(244, 244, 246)
 	art.BorderSizePixel = 0
 	art.Parent = frame
 	local artCorner = Instance.new("UICorner")
 	artCorner.CornerRadius = UDim.new(0, 8)
 	artCorner.Parent = art
 
-	local artNote = Instance.new("TextLabel")
-	artNote.Size = UDim2.fromScale(1, 1)
-	artNote.BackgroundTransparency = 1
-	artNote.Font = Enum.Font.Gotham
-	artNote.TextSize = 12
-	artNote.TextColor3 = Color3.fromRGB(255, 255, 255)
-	artNote.TextTransparency = 0.45
-	artNote.Text = "product image placeholder"
-	artNote.Parent = art
+	local assetId = model:GetAttribute("imageAssetId")
+	if assetId then
+		local photo = Instance.new("ImageLabel")
+		photo.Name = "Photo"
+		photo.Size = UDim2.fromScale(1, 1)
+		photo.BackgroundTransparency = 1
+		photo.ScaleType = Enum.ScaleType.Fit
+		photo.Image = assetId
+		photo.Parent = art
+	else
+		art.BackgroundColor3 = model:GetAttribute("garmentColour") or Color3.fromRGB(80, 80, 90)
+		local note = Instance.new("TextLabel")
+		note.Size = UDim2.fromScale(1, 1)
+		note.BackgroundTransparency = 1
+		note.Font = Enum.Font.Gotham
+		note.TextSize = 12
+		note.TextColor3 = Color3.fromRGB(255, 255, 255)
+		note.TextTransparency = 0.45
+		note.Text = "no product image"
+		note.Parent = art
+	end
 
 	local closeButton = Instance.new("TextButton")
 	closeButton.Name = "CloseButton"

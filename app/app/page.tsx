@@ -7,6 +7,7 @@ import { FunnelTable } from "@/components/FunnelTable";
 import { ExperimentPanel } from "@/components/ExperimentPanel";
 import { StoreHeat3D } from "@/components/StoreHeat3D";
 import { ExperimentCompare } from "@/components/ExperimentCompare";
+import { Card, SectionHeader, Stat, InfoTip } from "@/components/ui";
 
 const SECTIONS = [
   { id: "overview", label: "Overview" },
@@ -14,6 +15,15 @@ const SECTIONS = [
   { id: "result", label: "Experiment result" },
   { id: "experiment", label: "Run an experiment" },
 ];
+
+const FUNNEL = [
+  { key: "impressions", label: "Impressions", info: "Sessions where a display entered view from a distance, unobstructed. This is the difference between never seeing a product and seeing it and walking past." },
+  { key: "approaches", label: "Approaches", info: "Sessions where a player walked within 12 studs of the display." },
+  { key: "interactions", label: "Interactions", info: "Times a player triggered the display's prompt." },
+  { key: "panelOpens", label: "Panel opens", info: "Times the product panel was opened. Deliberate consideration, unlike standing nearby." },
+  { key: "ctaClicks", label: "CTA clicks", info: "Times a player pressed the buy button inside the panel." },
+  { key: "purchases", label: "Purchases", info: "Real Shopify orders matched back to a session by its single-use claim code." },
+] as const;
 
 export default function Lab() {
   const [data, setData] = useState<Analytics | null>(null);
@@ -66,48 +76,46 @@ export default function Lab() {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  const placeName = data?.place?.name ?? "—";
+
   return (
     <div className="flex min-h-screen">
-      <aside className="sticky top-0 hidden h-screen w-[236px] shrink-0 flex-col gap-1 overflow-y-auto border-r border-[var(--rbx-line)] px-3 py-4 lg:flex">
-        <div className="mb-4 flex items-center gap-2 px-2">
+      <aside className="sticky top-0 hidden h-screen w-[264px] shrink-0 flex-col overflow-y-auto border-r border-[var(--rbx-line)] px-4 py-5 lg:flex">
+        <div className="flex items-center gap-3 pb-4">
           <div
-            className="grid h-7 w-7 place-items-center rounded-[6px] font-bold"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] text-[15px] font-bold"
             style={{ background: "var(--rbx-accent)" }}
           >
-            S
+            {placeName.slice(0, 2).toUpperCase()}
           </div>
-          <span className="text-[15px] font-bold tracking-[0.1em]">SHELFSENSE</span>
+          <span className="min-w-0 flex-1 truncate text-[19px] font-bold">{placeName}</span>
+          <span className="text-[var(--rbx-faint)]">⋮</span>
         </div>
 
-        <div className="mb-3 flex items-center justify-between rounded-[8px] px-2 py-2 text-sm"
-          style={{ background: "var(--rbx-overlay)" }}>
-          <span className="truncate text-[var(--rbx-dim)]">HTN_26</span>
-          <span className="rbx-pill" style={{ background: "var(--rbx-overlay-strong)" }}>
-            {data?.experimentId ?? "live"}
-          </span>
+        <div className="border-t border-[var(--rbx-line)] pt-4">
+          {SECTIONS.map((s) => (
+            <button
+              key={s.id}
+              className="rbx-nav-item"
+              data-active={active === s.id}
+              onClick={() => jump(s.id)}
+            >
+              {s.label}
+            </button>
+          ))}
         </div>
 
-        {SECTIONS.map((s) => (
-          <button
-            key={s.id}
-            className="rbx-nav-item"
-            data-active={active === s.id}
-            onClick={() => jump(s.id)}
-          >
-            {s.label}
-          </button>
-        ))}
-
-        <div className="my-3 border-t border-[var(--rbx-line)]" />
-
-        <div className="px-2">
-          <div className="rbx-label mb-1.5">DATA SOURCE</div>
-          <div className="flex gap-1">
+        <div className="mt-6 border-t border-[var(--rbx-line)] pt-4">
+          <div className="mb-2 flex items-center gap-1.5 text-[13px] text-[var(--rbx-dim)]">
+            Data source
+            <InfoTip text="Seeded simulation is synthetic traffic used to fill the funnel before thousands of real encounters exist. Live sessions are real players. They are never blended silently." />
+          </div>
+          <div className="flex gap-1.5">
             {(["all", "sim", "live"] as const).map((o) => (
               <button
                 key={o}
                 onClick={() => setSource(o)}
-                className="flex-1 rounded-[6px] px-2 py-1 text-[11px] font-semibold uppercase"
+                className="flex-1 rounded-[8px] px-2 py-1.5 text-[12px] font-semibold uppercase"
                 style={
                   source === o
                     ? { background: "var(--rbx-accent)", color: "#fff" }
@@ -120,101 +128,105 @@ export default function Lab() {
           </div>
         </div>
 
-        <div className="mt-4 px-2">
-          <div className="rbx-label mb-1.5">EXPERIMENT</div>
+        <div className="mt-5">
+          <div className="mb-2 flex items-center gap-1.5 text-[13px] text-[var(--rbx-dim)]">
+            Experiment
+            <InfoTip text="Each experiment is a different store layout. Selecting All mixes layouts together, which blends numbers that are not comparable." />
+          </div>
           <select
             value={experimentId ?? ""}
             onChange={(e) => setExperimentId(e.target.value || null)}
-            className="w-full rounded-[6px] px-2 py-1.5 text-[12px]"
+            className="w-full rounded-[8px] px-2.5 py-2 text-[13px]"
             style={{ background: "var(--rbx-overlay)", color: "var(--rbx-text)" }}
           >
-            <option value="">All experiments (mixed)</option>
+            <option value="">All experiments</option>
             {(data?.experiments ?? []).map((id) => (
               <option key={id} value={id}>
                 {id}
               </option>
             ))}
           </select>
-          {!experimentId && (
-            <p className="mt-1.5 text-[10px] leading-4 text-[var(--rbx-faint)]">
-              Mixing experiments blends different store layouts into one number.
-            </p>
-          )}
         </div>
 
-        <div className="mt-auto px-2 pt-6">
+        <div className="mt-auto pt-6">
           <Provenance data={data} />
         </div>
       </aside>
 
-      <main className="min-w-0 flex-1 px-6 py-6 lg:px-9">
-        <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="text-[28px] font-bold leading-tight">Storefront analytics</h1>
-            <p className="mt-0.5 text-sm text-[var(--rbx-dim)]">
-              What players do around your products, and what to change about it.
-            </p>
-          </div>
-        </header>
+      <main className="min-w-0 flex-1 px-6 py-6 lg:px-10">
+        <h1 className="mb-6 text-[28px] font-bold leading-tight">Storefront analytics</h1>
 
         {error && (
-          <div className="rbx-card mb-5 p-4 text-sm text-red-400">read failed: {error}</div>
+          <Card className="mb-5">
+            <p className="text-sm text-red-400">read failed: {error}</p>
+          </Card>
         )}
 
         {data && (
           <>
-            <section id="overview" className="rbx-card mb-5 p-5">
-              <SectionTitle>Funnel</SectionTitle>
-              <div className="mt-4 flex flex-wrap items-start gap-x-3 gap-y-4">
-                <Stat label="IMPRESSIONS" value={totals.impressions} hint="saw it" />
-                <Arrow />
-                <Stat label="APPROACHES" value={totals.approaches} hint="walked to it" />
-                <Arrow />
-                <Stat label="INTERACTIONS" value={totals.interactions} hint="touched it" />
-                <Arrow />
-                <Stat label="PANEL OPENS" value={totals.panelOpens} hint="wanted more" />
-                <Arrow />
-                <Stat label="CTA CLICKS" value={totals.ctaClicks} hint="wanted it" />
-                <Arrow />
-                <Stat label="PURCHASES" value={totals.purchases} hint="bought it" />
+            <Card id="overview" className="mb-5">
+              <SectionHeader
+                title="Funnel"
+                info="Seven stages, where a normal store has about three. Each drop-off points at a different fix."
+                right={
+                  <span className="rounded-[8px] bg-[var(--rbx-overlay)] px-3 py-1.5 text-[13px] text-[var(--rbx-dim)]">
+                    {experimentId ?? "All experiments"}
+                  </span>
+                }
+              />
+              <div className="flex flex-wrap items-start gap-x-5 gap-y-5">
+                {FUNNEL.map((f, i) => (
+                  <div key={f.key} className="flex items-start gap-5">
+                    <Stat
+                      label={f.label}
+                      value={totals[f.key as keyof typeof totals]}
+                      info={f.info}
+                    />
+                    {i < FUNNEL.length - 1 && (
+                      <span className="pt-7 text-[var(--rbx-faint)]">&rarr;</span>
+                    )}
+                  </div>
+                ))}
               </div>
-            </section>
+            </Card>
 
-            <div className="mb-5 grid gap-5 xl:grid-cols-[minmax(0,400px)_minmax(0,1fr)]">
-              <section className="rbx-card p-5">
-                <SectionTitle>Store map</SectionTitle>
-                <div className="mt-3">
-                  <StoreMap
-                    slots={data.slots}
-                    components={data.components}
-                    heatmap={data.heatmap ?? []}
-                  />
-                </div>
-              </section>
+            <div className="mb-5 grid gap-5 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
+              <Card>
+                <SectionHeader
+                  title="Store map"
+                  info="Top-down view of the eight anchor slots. The number in each slot is its traffic rank, 1 being the busiest corridor. The blue wash is player path density."
+                />
+                <StoreMap
+                  slots={data.slots}
+                  components={data.components}
+                  heatmap={data.heatmap ?? []}
+                />
+              </Card>
 
-              <section className="rbx-card min-w-0 p-5">
-                <SectionTitle>Funnel by product</SectionTitle>
-                <div className="mt-3">
-                  <FunnelTable rows={data.components} />
-                </div>
-              </section>
+              <Card className="min-w-0">
+                <SectionHeader
+                  title="Funnel by product"
+                  info="Amber marks a product starved of impressions, or one that is seen but not approached. Hover any column header for what it measures."
+                />
+                <FunnelTable rows={data.components} />
+              </Card>
             </div>
 
-            <section id="space" className="rbx-card mb-5 p-5">
-              <SectionTitle>Attention in space</SectionTitle>
-              <p className="mb-3 mt-0.5 text-xs text-[var(--rbx-dim)]">
-                Where players walked, looked from, and stopped.
-              </p>
+            <Card id="space" className="mb-5">
+              <SectionHeader
+                title="Attention in space"
+                info="Where players walked, looked from, and stopped. Traffic spreads along the walk; attention pools tightly where people actually stop."
+              />
               <StoreHeat3D source={source} experimentId={experimentId} />
-            </section>
+            </Card>
 
-            <section id="result" className="mb-5">
+            <div id="result" className="mb-5">
               <ExperimentCompare experiments={data.experiments} source={source} />
-            </section>
+            </div>
 
-            <section id="experiment" className="mb-10">
+            <div id="experiment" className="mb-10">
               <ExperimentPanel />
-            </section>
+            </div>
           </>
         )}
       </main>
@@ -226,39 +238,21 @@ function Provenance({ data }: { data: Analytics | null }) {
   const sim = data?.sourceBreakdown.find((s) => s.source === "sim");
   const live = data?.sourceBreakdown.find((s) => s.source === "live");
   return (
-    <div className="space-y-2 text-[11px]">
-      <div>
-        <div className="font-semibold text-amber-400">SEEDED SIMULATION</div>
-        <div className="text-[var(--rbx-faint)]">
-          {sim ? `${sim.sessions.toLocaleString()} sessions` : "none"}
-        </div>
+    <div className="space-y-3 text-[13px]">
+      <div className="flex items-center justify-between">
+        <span className="font-semibold text-amber-400">Seeded</span>
+        <span className="text-[var(--rbx-faint)]">
+          {sim ? sim.sessions.toLocaleString() : "0"}
+        </span>
       </div>
-      <div>
-        <div className="font-semibold text-emerald-400">LIVE SESSIONS</div>
-        <div className="text-[var(--rbx-faint)]">
-          {live ? `${live.sessions.toLocaleString()} sessions` : "none"}
-        </div>
+      <div className="flex items-center justify-between">
+        <span className="font-semibold text-emerald-400">Live</span>
+        <span className="text-[var(--rbx-faint)]">
+          {live ? live.sessions.toLocaleString() : "0"}
+        </span>
       </div>
     </div>
   );
-}
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <h2 className="text-[15px] font-bold">{children}</h2>;
-}
-
-function Stat({ label, value, hint }: { label: string; value: number; hint: string }) {
-  return (
-    <div className="min-w-[96px]">
-      <div className="rbx-label">{label}</div>
-      <div className="text-[26px] font-bold leading-tight">{value.toLocaleString()}</div>
-      <div className="text-[11px] text-[var(--rbx-faint)]">{hint}</div>
-    </div>
-  );
-}
-
-function Arrow() {
-  return <div className="self-center pt-4 text-[var(--rbx-faint)]">&rarr;</div>;
 }
 
 export type { ComponentRow };

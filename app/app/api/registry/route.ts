@@ -22,6 +22,7 @@ export type Registry = {
   }[];
   kinds: string[];
   experimentId: string;
+  place?: { name: string; placeId: number; gameId: number };
 };
 
 export function readRegistry(): (Registry & { updatedAt: number }) | null {

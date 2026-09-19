@@ -9,3 +9,10 @@ data/
 *.rbxlx
 BUILD_SPEC.md
 CLAUDE.md
+# product images pulled from Shopify at build time
+app/public/products/
+
+# cloudflare worker
+worker/.dev.vars
+worker/.env
+.dev.vars

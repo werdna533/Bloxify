@@ -40,6 +40,7 @@ export type Analytics = {
   experiments: string[];
   sourceBreakdown: { source: string; events: number; sessions: number }[];
   slots: Slot[];
+  place?: { name: string; placeId: number; gameId: number };
   registryUpdatedAt: number | null;
   components: ComponentRow[];
   heatmap?: { x: number; z: number; n: number }[];

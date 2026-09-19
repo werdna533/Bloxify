@@ -277,6 +277,11 @@ function StorefrontAPI.registry(): string
 		components = components,
 		kinds = ComponentLibrary.KINDS,
 		experimentId = workspace:GetAttribute("ExperimentId") or "exp_baseline",
+		place = {
+			name = game.Name,
+			placeId = game.PlaceId,
+			gameId = game.GameId,
+		},
 	})
 end
 

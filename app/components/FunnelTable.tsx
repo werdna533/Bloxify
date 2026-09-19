@@ -65,7 +65,7 @@ export function FunnelTable({ rows }: { rows: ComponentRow[] }) {
   }
 
   return (
-    <div className="overflow-x-auto rbx-inset">
+    <div className="overflow-x-auto rounded-[10px] bg-[var(--rbx-overlay)]">
       <table className="w-full border-collapse text-xs">
         <thead>
           <tr className="bg-[var(--rbx-overlay)] text-left text-[var(--rbx-dim)]">
@@ -118,10 +118,6 @@ export function FunnelTable({ rows }: { rows: ComponentRow[] }) {
           })}
         </tbody>
       </table>
-      <p className="px-2 py-2 text-[10px] text-[var(--rbx-faint)]">
-        Amber = starved of impressions, or seen but not approached. Hover a header for what the
-        column means.
-      </p>
     </div>
   );
 }

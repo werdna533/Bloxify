@@ -38,6 +38,7 @@ export async function GET(request: Request) {
     experiments: experimentIds(),
     sourceBreakdown: sourceBreakdown(experimentId),
     slots: registry?.slots ?? [],
+    place: registry?.place ?? null,
     registryUpdatedAt: registry?.updatedAt ?? null,
     components: rows,
     heatmap: wantHeatmap ? heatmap(experimentId, source) : undefined,

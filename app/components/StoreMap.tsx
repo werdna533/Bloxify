@@ -42,7 +42,7 @@ export function StoreMap({
   const cell = Math.max(2, sx(minX + 2) - sx(minX));
 
   return (
-    <div className="rbx-inset p-3">
+    <div className="rounded-[10px] bg-[var(--rbx-overlay)] p-3">
       <svg viewBox={`0 0 ${width} ${height}`} className="w-full" role="img">
         {heatmap.map((h, i) => (
           <rect
@@ -118,10 +118,6 @@ export function StoreMap({
           );
         })}
       </svg>
-      <p className="mt-2 text-[10px] leading-4 text-[var(--rbx-faint)]">
-        Number in each slot is its traffic rank (1 = busiest corridor, 8 = dead corner). Dashed =
-        empty. Blue wash is player path density.
-      </p>
     </div>
   );
 }
