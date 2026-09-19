@@ -158,6 +158,10 @@ RunService.RenderStepped:Connect(function(delta: number)
 							type = "display_gaze",
 							surface = "physical",
 							componentId = componentId,
+							-- Where they were looking FROM, which is what an
+							-- attention heatmap is actually made of.
+							pos = { camPos.X, camPos.Y, camPos.Z },
+							look = { camLook.X, camLook.Y, camLook.Z },
 							meta = { gazeSeconds = seconds, distance = g.distance },
 						})
 					end
@@ -184,6 +188,8 @@ RunService.RenderStepped:Connect(function(delta: number)
 						type = "display_impression",
 						surface = "physical",
 						componentId = componentId,
+						pos = { camPos.X, camPos.Y, camPos.Z },
+						look = { camLook.X, camLook.Y, camLook.Z },
 						meta = { distance = distance },
 					})
 				end

@@ -139,12 +139,17 @@ local function wirePrompt(model: Model)
 		local near = session.near[componentId]
 		if near then near.interacted = true end
 
+		local character = player.Character
+		local hrp = character and character:FindFirstChild("HumanoidRootPart")
+		local at = hrp and hrp.Position or nil
+
 		push(session, {
 			t = now(),
 			type = "display_interacted",
 			surface = "physical",
 			componentId = componentId,
 			productId = model:GetAttribute("productId"),
+			pos = at and { at.X, at.Y, at.Z } or nil,
 			meta = { holdSeconds = prompt.HoldDuration },
 		})
 	end)
@@ -200,6 +205,20 @@ remote.OnServerEvent:Connect(function(player: Player, payload: any)
 		end
 	end
 
+	-- Where the player was standing and which way the camera pointed. This is
+	-- what makes an attention heatmap possible: "looked at it" is far less
+	-- useful than "looked at it from over there".
+	local function vec3(value: any): { number }?
+		if typeof(value) ~= "table" or #value ~= 3 then return nil end
+		local out = {}
+		for i = 1, 3 do
+			local n = value[i]
+			if typeof(n) ~= "number" or n ~= n or math.abs(n) > 10000 then return nil end
+			out[i] = n
+		end
+		return out
+	end
+
 	local componentId = typeof(payload.componentId) == "string" and payload.componentId or nil
 	local productId = nil
 	if componentId then
@@ -226,6 +245,8 @@ remote.OnServerEvent:Connect(function(player: Player, payload: any)
 		surface = payload.surface == "gui" and "gui" or "physical",
 		componentId = componentId,
 		productId = productId,
+		pos = vec3(payload.pos),
+		look = vec3(payload.look),
 		meta = meta,
 	})
 end)
@@ -325,6 +346,7 @@ RunService.Heartbeat:Connect(function(delta: number)
 								surface = "physical",
 								componentId = componentId,
 								productId = model:GetAttribute("productId"),
+								pos = { pos.X, pos.Y, pos.Z },
 								meta = {
 									minSpeed = near.minSpeed,
 									dwellSeconds = os.clock() - near.enteredAt,
@@ -338,6 +360,7 @@ RunService.Heartbeat:Connect(function(delta: number)
 							surface = "physical",
 							componentId = componentId,
 							productId = model:GetAttribute("productId"),
+							pos = { pos.X, pos.Y, pos.Z },
 							meta = {
 								dwellSeconds = os.clock() - near.enteredAt,
 								minDistance = near.minDistance,

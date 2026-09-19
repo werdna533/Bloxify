@@ -54,14 +54,24 @@ local function findComponent(componentId: string): Model?
 	return nil
 end
 
-local function touch(action: string)
+local function touch(action: string, toComponentId: string?)
 	if not state then return end
 	local nowClock = os.clock()
 	if nowClock - state.lastAction <= ACTIVE_WINDOW then
 		state.activeSeconds += nowClock - state.lastAction
 	end
 	state.lastAction = nowClock
-	report({ type = "panel_engaged", surface = "gui", componentId = state.componentId, meta = { action = action } })
+
+	local meta: { [string]: any } = { action = action }
+	if toComponentId then
+		-- Which item they browsed to. Attention this item earned while the
+		-- player was standing at a different display is demand that placement
+		-- did not create, and nothing else in the funnel can show it.
+		meta.toComponentId = toComponentId
+		meta.fromComponentId = state.anchorComponentId
+	end
+
+	report({ type = "panel_engaged", surface = "gui", componentId = state.componentId, meta = meta })
 end
 
 function ProductPanel.close(reason: string)
@@ -265,7 +275,7 @@ local function build(model: Model, openMethod: string, keepSession: boolean?)
 				border.Parent = swatch
 			else
 				swatch.Activated:Connect(function()
-					touch("tab")
+					touch("tab", otherId)
 					local target = findComponent(otherId)
 					if target then build(target, "tab", true) end
 				end)
