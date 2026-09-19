@@ -237,6 +237,202 @@ function ops.swap_products(op: { [string]: any }): (boolean, string?)
 	return true
 end
 
+-- ---------------------------------------------------------------- sightlines
+
+--[[
+	How visible a slot actually is, as opposed to how close it is.
+
+	trafficRank is derived from walking distance to the spawn, which says
+	nothing about whether a display can be seen from the floor around it. In
+	this place Slot_B is the closest slot to spawn and is also hidden behind a
+	doorframe, so the two measures disagree — and a product can be starved of
+	impressions by scenery rather than by placement.
+
+	Sampled by raycasting to the slot from a fan of points in front of it.
+]]
+local SIGHT_RADII = { 8, 14, 20, 28 }
+local SIGHT_SPREAD = 80 -- degrees either side of the slot's facing
+
+function StorefrontAPI.computeSightlines(): string
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+
+	local ignore = {}
+	for _, m in ipairs(CollectionService:GetTagged("StorefrontComponent")) do
+		table.insert(ignore, m)
+	end
+	for _, s in ipairs(CollectionService:GetTagged("StorefrontSlot")) do
+		table.insert(ignore, s)
+	end
+	local forcefields = workspace:FindFirstChild("Forcefields")
+	if forcefields then table.insert(ignore, forcefields) end
+	params.FilterDescendantsInstances = ignore
+
+	local results = {}
+	for _, slot in ipairs(CollectionService:GetTagged("StorefrontSlot")) do
+		local target = slot.Position + Vector3.new(0, 4, 0)
+		local facing = slot:GetAttribute("facing") or Vector3.new(0, 0, 1)
+		local baseAngle = math.atan2(facing.Z, facing.X)
+
+		local visible, total = 0, 0
+		for _, radius in ipairs(SIGHT_RADII) do
+			for deg = -SIGHT_SPREAD, SIGHT_SPREAD, 20 do
+				local angle = baseAngle + math.rad(deg)
+				local from = Vector3.new(
+					slot.Position.X + math.cos(angle) * radius,
+					slot.Position.Y + 3,
+					slot.Position.Z + math.sin(angle) * radius
+				)
+				-- Only count vantage points that are themselves standable.
+				local ground = workspace:Raycast(from + Vector3.new(0, 6, 0), Vector3.new(0, -14, 0), params)
+				if ground then
+					total += 1
+					if not workspace:Raycast(from, target - from, params) then
+						visible += 1
+					end
+				end
+			end
+		end
+
+		local score = total > 0 and (visible / total) or 0
+		slot:SetAttribute("visibilityScore", math.floor(score * 1000) / 1000)
+		slot:SetAttribute("visibilitySamples", total)
+		results[slot:GetAttribute("slotId")] = {
+			score = math.floor(score * 1000) / 1000,
+			visible = visible,
+			samples = total,
+			trafficRank = slot:GetAttribute("trafficRank"),
+		}
+	end
+
+	return HttpService:JSONEncode(results)
+end
+
+--[[
+	Finds a camera position with a clear view of a target.
+
+	The storefront sits among doorframes, wall trim and foliage, so a fixed
+	camera offset lands inside scenery about as often as not. This searches a
+	ring of candidate positions and returns the first one that can actually see
+	what it is pointed at, which is what before/after screenshots need.
+]]
+function StorefrontAPI.findCamera(targetPos: Vector3, ignore: { Instance }): (Vector3?, Vector3)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	local exclude = {}
+	for _, inst in ipairs(ignore) do table.insert(exclude, inst) end
+	local forcefields = workspace:FindFirstChild("Forcefields")
+	if forcefields then table.insert(exclude, forcefields) end
+	params.FilterDescendantsInstances = exclude
+
+	local look = targetPos + Vector3.new(0, 1.5, 0)
+	for _, radius in ipairs({ 9, 12, 15, 18, 22 }) do
+		for _, height in ipairs({ 3, 5, 7 }) do
+			for deg = 0, 350, 15 do
+				local rad = math.rad(deg)
+				local from = targetPos + Vector3.new(math.cos(rad) * radius, height, math.sin(rad) * radius)
+				if not workspace:Raycast(from, look - from, params) then
+					return from, look
+				end
+			end
+		end
+	end
+	return nil, look
+end
+
+-- Parks the edit camera on a component so a screenshot can be taken of it.
+function StorefrontAPI.frameComponent(componentId: string): string
+	local model = findComponent(componentId)
+	if not model then
+		return HttpService:JSONEncode({ ok = false, error = "unknown componentId " .. tostring(componentId) })
+	end
+
+	local target = model:GetPivot().Position
+	local from, look = StorefrontAPI.findCamera(target, { model })
+	if not from then
+		return HttpService:JSONEncode({ ok = false, error = "no unobstructed camera position found" })
+	end
+
+	local cam = workspace.CurrentCamera
+	cam.CameraType = Enum.CameraType.Fixed
+	cam.FieldOfView = 50
+	cam.CFrame = CFrame.lookAt(from, look)
+	return HttpService:JSONEncode({
+		ok = true,
+		componentId = componentId,
+		from = { from.X, from.Y, from.Z },
+		lookAt = { look.X, look.Y, look.Z },
+	})
+end
+
+-- A wide shot that can see the most displays at once, for the store overview.
+function StorefrontAPI.frameStore(): string
+	local components = CollectionService:GetTagged("StorefrontComponent")
+	if #components == 0 then
+		return HttpService:JSONEncode({ ok = false, error = "no components" })
+	end
+
+	local sum = Vector3.zero
+	for _, m in ipairs(components) do sum += m:GetPivot().Position end
+	local centre = sum / #components
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = components
+
+	-- Counting visible displays alone picks spots jammed against a wall: the
+	-- rays to the displays are clear while the frame is filled with masonry.
+	-- Openness samples a fan around the view direction and rewards a position
+	-- that can actually see into the room.
+	local function openness(from: Vector3, look: Vector3): number
+		local forward = (look - from).Unit
+		local total, samples = 0, 0
+		for _, yaw in ipairs({ -25, -12, 0, 12, 25 }) do
+			for _, pitch in ipairs({ -8, 0, 8 }) do
+				local dir = (CFrame.lookAt(from, look) * CFrame.Angles(math.rad(pitch), math.rad(yaw), 0)).LookVector
+				local hit = workspace:Raycast(from, dir * 90, params)
+				total += hit and hit.Distance or 90
+				samples += 1
+			end
+		end
+		return samples > 0 and (total / samples) or 0
+	end
+
+	local best, bestScore, bestSeen = nil, -1, 0
+	local bestLookPoint = centre + Vector3.new(0, 2, 0)
+	for _, radius in ipairs({ 30, 40, 50, 60 }) do
+		for _, height in ipairs({ 10, 14, 18 }) do
+			for deg = 0, 350, 20 do
+				local rad = math.rad(deg)
+				local from = centre + Vector3.new(math.cos(rad) * radius, height, math.sin(rad) * radius)
+				local seen = 0
+				for _, m in ipairs(components) do
+					local to = m:GetPivot().Position + Vector3.new(0, 2, 0)
+					if not workspace:Raycast(from, to - from, params) then seen += 1 end
+				end
+				-- Weight both: a clear view of three displays beats a walled-in
+				-- view of four.
+				local score = seen * 12 + openness(from, bestLookPoint)
+				if score > bestScore then
+					best, bestScore, bestSeen = from, score, seen
+				end
+			end
+		end
+	end
+	local bestLook = bestLookPoint
+
+	local cam = workspace.CurrentCamera
+	cam.CameraType = Enum.CameraType.Fixed
+	cam.FieldOfView = 60
+	cam.CFrame = CFrame.lookAt(best, bestLook)
+	return HttpService:JSONEncode({
+		ok = true,
+		visibleDisplays = bestSeen,
+		totalDisplays = #components,
+		from = { best.X, best.Y, best.Z },
+	})
+end
+
 -- ------------------------------------------------------------------- reading
 
 function StorefrontAPI.registry(): string
@@ -247,6 +443,7 @@ function StorefrontAPI.registry(): string
 		table.insert(slots, {
 			slotId = s:GetAttribute("slotId"),
 			trafficRank = s:GetAttribute("trafficRank"),
+			visibilityScore = s:GetAttribute("visibilityScore"),
 			pos = { s.Position.X, s.Position.Y, s.Position.Z },
 			facing = { facing.X, facing.Y, facing.Z },
 		})

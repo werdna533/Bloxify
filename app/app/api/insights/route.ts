@@ -34,9 +34,18 @@ export async function POST(request: Request) {
   // Small and structured. The model never sees raw event rows.
   const context = {
     store: {
-      slots: registry.slots.map((s) => ({ slotId: s.slotId, trafficRank: s.trafficRank })),
+      slots: registry.slots.map((s) => ({
+        slotId: s.slotId,
+        trafficRank: s.trafficRank,
+        visibilityScore: s.visibilityScore ?? null,
+      })),
       kinds: registry.kinds,
-      note: "trafficRank 1 is the busiest corridor, 8 is a dead corner.",
+      note:
+        "trafficRank 1 is the busiest corridor, 8 is a dead corner. visibilityScore is separate: " +
+        "thing again: the share of nearby standing positions from which the slot can physically be " +
+        "seen, measured by raycast against the room geometry. Do not confuse it with sightlineRate " +
+        "in the metrics, which is a behavioural ratio. A slot can be close to the spawn and still be " +
+        "hidden behind scenery, and moving a product into a low visibilityScore slot will starve it.",
     },
     components: registry.components.map((c) => ({
       componentId: c.componentId,

@@ -5,7 +5,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export type Registry = {
-  slots: { slotId: string; trafficRank: number; pos: number[]; facing: number[] }[];
+  slots: {
+    slotId: string;
+    trafficRank: number;
+    visibilityScore?: number | null;
+    pos: number[];
+    facing: number[];
+  }[];
   components: {
     componentId: string;
     productId: string;

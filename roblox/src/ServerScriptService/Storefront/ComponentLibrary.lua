@@ -103,12 +103,29 @@ local function addBillboard(model: Model, anchor: BasePart, height: number)
 	price.Parent = bb
 end
 
-local function buildMannequin(garmentColour: Color3, garmentOnLegs: boolean): (Model, BasePart)
-	local model = Instance.new("Model")
+--[[
+	An axis-aligned anchor used as the PrimaryPart.
 
-	local root = part("Root", Vector3.new(4.2, 0.6, 4.2), Vector3.new(0, 0.3, 0), PEDESTAL, "Cylinder")
+	The pedestal is a cylinder, and Roblox cylinders extend along X, so drawing
+	one upright means baking a 90 degree roll into its CFrame. Making that the
+	PrimaryPart puts the roll into the model's pivot, and PivotTo then cancels
+	it out and lays the whole display on its side. So the anchor is a plain
+	unrotated block and the cylinder is just a child of it.
+]]
+local function buildRoot(model: Model, size: Vector3): BasePart
+	local root = part("Root", size, Vector3.new(0, size.Y / 2, 0), PEDESTAL)
+	root.Transparency = 1
 	root.CanCollide = true
 	root.Parent = model
+
+	local pedestal = part("Pedestal", size, Vector3.new(0, size.Y / 2, 0), PEDESTAL, "Cylinder")
+	pedestal.Parent = model
+	return root
+end
+
+local function buildMannequin(garmentColour: Color3, garmentOnLegs: boolean): (Model, BasePart)
+	local model = Instance.new("Model")
+	local root = buildRoot(model, Vector3.new(4.2, 0.6, 4.2))
 
 	part("Legs", Vector3.new(1.7, 3.0, 1.1), Vector3.new(0, 2.1, 0), SHELL).Parent = model
 	part("Torso", Vector3.new(2.2, 2.6, 1.2), Vector3.new(0, 4.9, 0), SHELL).Parent = model
@@ -131,10 +148,7 @@ end
 
 local function buildPlushStand(bodyColour: Color3): (Model, BasePart)
 	local model = Instance.new("Model")
-
-	local root = part("Root", Vector3.new(3.6, 2.4, 3.6), Vector3.new(0, 1.2, 0), PEDESTAL, "Cylinder")
-	root.CanCollide = true
-	root.Parent = model
+	local root = buildRoot(model, Vector3.new(3.6, 2.4, 3.6))
 
 	-- Front of a part is its -Z face, and models are pivoted so -Z faces the
 	-- aisle, so the goose has to look down -Z or it faces the wall.

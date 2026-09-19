@@ -1,6 +1,7 @@
 export type Slot = {
   slotId: string;
   trafficRank: number;
+  visibilityScore?: number | null;
   pos: number[];
   facing: number[];
 };
