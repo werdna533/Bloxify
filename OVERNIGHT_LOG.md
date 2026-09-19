@@ -27,13 +27,26 @@ You are on the **top tier of the fallback ladder**, not a fallback. Fallback 2
 (the Studio plugin, no MCP at all) is also built and its apply and rollback
 paths are tested, so there is a rung below you as well.
 
-**FIRST THING TO DO: record the loop.** The dev server and the Bridge are both
-still running, and Studio is at baseline. Open http://localhost:3000, press
-ANALYZE → SAVE → APPLY TO ROBLOX with Studio visible, and capture it. It takes
-about a minute and it is the thing that makes the demo safe.
+**FIRST THING TO DO: start the two processes, then record the loop.**
 
-If they are not running any more:
-`cd app && npm run dev`, then `cd bridge && npx tsx index.ts`.
+The dev server and the Bridge were both running and verified at the end of the
+night, but the system stopped them afterwards because it was low on memory
+while idle. Nothing is broken and nothing needs debugging — they just need
+starting again. Two terminals:
+
+```
+cd app    && npm run dev        # http://localhost:3000
+cd bridge && npx tsx index.ts   # waits for a plan
+```
+
+Also check `cloudflared` is still up. It is a quick tunnel, so if it restarted
+the URL changed, and both Roblox and the Shopify webhook point at the old one.
+If it changed: put the new URL in `.env.local` as `TUNNEL_URL`, then rerun
+`cd bridge && npx tsx sync-config.ts` to push it into the place.
+
+Then, with Studio visible: open http://localhost:3000, press ANALYZE → SAVE →
+APPLY TO ROBLOX, and capture it. About a minute, and it is what makes the demo
+safe.
 
 **SECOND THING: the single most important item to look at is the Shopify
 scopes**, below. Two checkboxes in the Shopify admin, no code changes, and it
