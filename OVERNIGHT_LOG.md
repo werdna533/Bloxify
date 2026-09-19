@@ -29,8 +29,46 @@ screen capture of this before changing anything.
 To re-run it yourself: `npm run dev` in `app/`, `npx tsx index.ts` in `bridge/`,
 open http://localhost:3000, press ANALYZE, then SAVE, then APPLY TO ROBLOX.
 
-Status: core loop done. Remaining: in-game telemetry Luau (the simulator
-covers the data path today), Shopify claim codes, before/after images.
+### Phase status at hand-off
+
+| Spec phase | State | Proof |
+|---|---|---|
+| POC 1 Roblox → backend | **Working** | prompt trigger in playtest → row in SQLite |
+| POC 2 backend → dashboard | **Working** | `/api/stats`, `/api/analytics` return live counts |
+| POC 3 Node stdio → Studio MCP | **Working** | `bridge/*.ts` writes to the place |
+| Storefront: 8 slots, 5 displays | **Working** | attributes read back from the place |
+| Telemetry + ingest | **Working** | full 7-stage funnel lands from a real playtest |
+| Simulator | **Working** | 2,012 sessions / ~69k events, labelled `sim` |
+| StorefrontAPI + one-click apply | **Working** | rehearsed apply + rollback, twice |
+| Dashboard: map, funnel, experiment | **Working** | page renders, polls every 4s |
+| AI: context, schema, validator | **Working** | GPT-5.4 found the planted problem twice |
+| Shopify: product import | **Working** | 5 products mapped to their displays |
+| Shopify: order webhook | **Working** | HMAC verified, attribution proven |
+| Shopify: claim codes | **Blocked** | app missing `write_discounts` — see below |
+| Before/after screenshots | **Blocked** | Studio viewport renders blank — see below |
+| Auto-playtest bot | **Not built** | pathfinding unusable in this map; needs CFrame routes |
+
+### Full demo rehearsal, run end to end just before hand-off
+
+Every step passed with nothing touched by hand:
+
+1. Dashboard responds 200.
+2. `pull-registry.ts` refreshed 8 slots and 5 components out of Studio.
+3. Analytics returned 5 components, and correctly reported both sources
+   separately: 180 live events over 7 sessions, 69,458 simulated over 2,012.
+4. Products pulled from Shopify with no sync error.
+5. ANALYZE produced: *"The rugby shirt display is receiving very low exposure
+   in the lowest-traffic slot, so there is not enough data to judge its later
+   funnel stages and exposure should be tested first."* — 1 op, validator
+   accepted it, 0 rejected.
+6. Saved as `exp_02`.
+7. APPLY: Bridge snapshotted (1831 bytes), applied `move_to_slot`, captured,
+   reported done.
+8. ROLLBACK: restored all 5 components.
+
+Studio was confirmed back at baseline afterwards: every component in its
+original slot, prominence 1, scale 1.00, `ExperimentId` back to
+`exp_baseline`. **The demo survives being run repeatedly.**
 
 ---
 
@@ -222,6 +260,25 @@ hours 22–25). The spec's own cut list already says take those manually if
 needed, so this does not threaten the core demo. Everything else — telemetry,
 metrics, AI plan, and applying changes to Studio — is unaffected, and I am
 carrying on with those.
+
+### Worth knowing: Slot_B is a worse slot than its rank suggests
+
+While testing line of sight I found that the classic tee in Slot_B — traffic
+rank **1**, supposedly the best spot — is actually blocked from 7 of 9 probe
+positions by a doorframe and a wall corner in the arena's own geometry.
+
+`trafficRank` is currently derived purely from distance to the spawn, which
+says nothing about whether a display can actually be *seen* from the walkway.
+The simulator inherits that assumption, so simulated impressions track rank
+while real impressions will not.
+
+I did not change this, because redefining `trafficRank` would invalidate both
+the seeded data and the AI's current finding, and it is a structural decision
+rather than a bug fix. **The case for changing it:** add a `sightlineScore`
+per slot, computed once by raycasting to it from a set of walkway points, and
+give that to the AI alongside `trafficRank`. That would let it say "this slot
+is close but blind", which is a sharper finding than anything it can make
+today, and it is maybe an hour's work. Your call.
 
 ### Pathfinding does not work in this map
 
