@@ -29,8 +29,10 @@ if (!AUTH_TOKEN) {
 
 type Pending = {
   pending: boolean;
+  action?: "apply" | "restore";
   experimentId?: string;
   plan?: { experimentId: string; ops: Record<string, unknown>[] };
+  snapshot?: string;
 };
 
 function authHeaders() {
@@ -136,6 +138,23 @@ async function applyExperiment(bridge: StudioBridge, pending: Pending): Promise<
   console.log(`[bridge] ${experimentId}: done`);
 }
 
+async function restoreExperiment(bridge: StudioBridge, pending: Pending): Promise<void> {
+  const experimentId = pending.experimentId!;
+  console.log(`[bridge] ${experimentId}: restoring pre-apply snapshot`);
+
+  const result = await bridge.executeLuau(
+    `local snap = ${luauLongString(pending.snapshot!)}\n` +
+      `return require(game.ServerScriptService.Storefront.StorefrontAPI).restore(snap)`,
+    "Edit",
+  );
+  if (result.isError) {
+    await report({ experimentId, stage: "failed", error: `restore failed: ${result.text}` });
+    return;
+  }
+  console.log(`[bridge] ${experimentId}: restored — ${result.text}`);
+  await report({ experimentId, stage: "rolled_back" });
+}
+
 async function main() {
   const bridge = new StudioBridge();
   await bridge.connect();
@@ -149,9 +168,13 @@ async function main() {
       if (!res.ok) throw new Error(`HTTP ${res.status} ${await res.text()}`);
       const pending = (await res.json()) as Pending;
 
-      if (pending.pending && pending.experimentId && pending.plan) {
+      if (pending.pending && pending.experimentId) {
         idleLogged = false;
-        await applyExperiment(bridge, pending);
+        if (pending.action === "restore" && pending.snapshot) {
+          await restoreExperiment(bridge, pending);
+        } else if (pending.plan) {
+          await applyExperiment(bridge, pending);
+        }
       } else if (!idleLogged) {
         console.log("[bridge] connected, waiting for a plan");
         idleLogged = true;

@@ -11,8 +11,16 @@ export function nextExperimentId(): string {
 }
 
 export async function GET() {
+  // Deliberately excludes the snapshot and the base64 images: this is polled
+  // every couple of seconds and they are large.
   const rows = db()
-    .prepare(`SELECT * FROM experiments ORDER BY created_at DESC LIMIT 25`)
+    .prepare(
+      `SELECT id, name, hypothesis, status, created_at, plan_json, error,
+              snapshot_before_json IS NOT NULL AS snapshot_before_json,
+              image_before IS NOT NULL AS has_image_before,
+              image_after  IS NOT NULL AS has_image_after
+       FROM experiments ORDER BY created_at DESC LIMIT 25`,
+    )
     .all();
   return Response.json({ experiments: rows });
 }

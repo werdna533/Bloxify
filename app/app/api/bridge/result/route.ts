@@ -10,7 +10,7 @@ export async function POST(request: Request) {
 
   const body = (await request.json()) as {
     experimentId: string;
-    stage?: "snapshot" | "applied" | "captured" | "failed";
+    stage?: "snapshot" | "applied" | "captured" | "failed" | "rolled_back";
     snapshot?: string;
     result?: Record<string, unknown>;
     imageBefore?: string;
@@ -53,7 +53,11 @@ export async function POST(request: Request) {
 
   if (body.stage) {
     const status =
-      body.stage === "failed" ? "failed" : body.stage === "captured" ? "done" : body.stage;
+      body.stage === "failed"
+        ? "failed"
+        : body.stage === "captured"
+          ? "done"
+          : body.stage;
     handle
       .prepare(`UPDATE experiments SET status = ?, error = ? WHERE id = ?`)
       .run(status, body.error ?? null, body.experimentId);

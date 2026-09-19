@@ -13,20 +13,33 @@ export async function GET(request: Request) {
   const claim = handle.transaction(() => {
     const row = handle
       .prepare(
-        `SELECT id, plan_json FROM experiments
-         WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1`,
+        `SELECT id, plan_json, snapshot_before_json, status FROM experiments
+         WHERE status IN ('queued', 'rollback_queued') ORDER BY created_at ASC LIMIT 1`,
       )
-      .get() as { id: string; plan_json: string } | undefined;
+      .get() as
+      | { id: string; plan_json: string; snapshot_before_json: string | null; status: string }
+      | undefined;
     if (!row) return null;
-    handle.prepare(`UPDATE experiments SET status = 'applying' WHERE id = ?`).run(row.id);
+    const next = row.status === "rollback_queued" ? "rolling_back" : "applying";
+    handle.prepare(`UPDATE experiments SET status = ? WHERE id = ?`).run(next, row.id);
     return row;
   });
 
   const claimed = claim();
   if (!claimed) return Response.json({ pending: false });
 
+  if (claimed.status === "rollback_queued") {
+    return Response.json({
+      pending: true,
+      action: "restore",
+      experimentId: claimed.id,
+      snapshot: claimed.snapshot_before_json,
+    });
+  }
+
   return Response.json({
     pending: true,
+    action: "apply",
     experimentId: claimed.id,
     plan: JSON.parse(claimed.plan_json),
   });

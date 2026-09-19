@@ -74,10 +74,10 @@ export function ExperimentPanel() {
     }
   };
 
-  const apply = async (id: string) => {
-    setBusy(`apply-${id}`);
+  const act = async (id: string, verb: "apply" | "rollback") => {
+    setBusy(`${verb}-${id}`);
     try {
-      const res = await fetch(`/api/experiments/${id}/apply`, { method: "POST" });
+      const res = await fetch(`/api/experiments/${id}/${verb}`, { method: "POST" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
       await refresh();
@@ -87,6 +87,8 @@ export function ExperimentPanel() {
       setBusy(null);
     }
   };
+
+  const apply = (id: string) => act(id, "apply");
 
   return (
     <div className="rounded border border-neutral-800 bg-[#141416] p-5">
@@ -183,6 +185,16 @@ export function ExperimentPanel() {
                     className="rounded border border-neutral-700 px-2 py-1 text-[10px] tracking-wider hover:bg-neutral-800"
                   >
                     APPLY
+                  </button>
+                )}
+                {e.snapshot_before_json && e.status !== "rolling_back" && (
+                  <button
+                    onClick={() => act(e.id, "rollback")}
+                    disabled={busy !== null}
+                    className="rounded border border-amber-700/70 px-2 py-1 text-[10px] tracking-wider text-amber-300 hover:bg-amber-900/30"
+                    title="Restore the snapshot taken before this apply"
+                  >
+                    ROLL BACK
                   </button>
                 )}
                 {e.error && <span className="text-red-400">{e.error}</span>}

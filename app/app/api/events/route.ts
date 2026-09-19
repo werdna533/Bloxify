@@ -7,6 +7,12 @@ export const dynamic = "force-dynamic";
 
 const vec3 = z.array(z.number()).length(3);
 
+// Luau encodes an empty table as [], not {}, so an event carrying no metadata
+// arrives as an array. Accept it and normalise rather than rejecting.
+const metaSchema = z
+  .union([z.record(z.string(), z.unknown()), z.array(z.unknown())])
+  .transform((value) => (Array.isArray(value) ? {} : value));
+
 const eventSchema = z.object({
   t: z.number(),
   type: z.string().min(1).max(64),
@@ -15,7 +21,7 @@ const eventSchema = z.object({
   productId: z.string().max(128).optional(),
   pos: vec3.optional(),
   look: vec3.optional(),
-  meta: z.record(z.string(), z.unknown()).optional(),
+  meta: metaSchema.optional(),
 });
 
 const envelopeSchema = z.object({
@@ -23,7 +29,7 @@ const envelopeSchema = z.object({
   placeVersion: z.number().optional(),
   experimentId: z.string().max(64).optional(),
   source: z.enum(["live", "sim"]).optional(),
-  events: z.array(eventSchema).max(500),
+  events: z.array(z.unknown()).max(500),
 });
 
 // A client can lie about how long it looked at something. Clamp so one bad
@@ -72,8 +78,26 @@ export async function POST(request: Request) {
     return Response.json({ error: "invalid envelope", issues: parsed.error.issues }, { status: 400 });
   }
 
-  const { sessionId, placeVersion, experimentId, events } = parsed.data;
+  const { sessionId, placeVersion, experimentId } = parsed.data;
   const source = parsed.data.source ?? "live";
+
+  // Validate per event. One malformed event must never discard the batch it
+  // travelled in — that silently loses everything a player just did.
+  const events: z.infer<typeof eventSchema>[] = [];
+  const rejected: { index: number; reason: string }[] = [];
+  parsed.data.events.forEach((raw, index) => {
+    const event = eventSchema.safeParse(raw);
+    if (event.success) events.push(event.data);
+    else rejected.push({ index, reason: event.error.issues.map((i) => i.message).join("; ") });
+  });
+
+  if (rejected.length > 0) {
+    console.error(`[events] dropped ${rejected.length} malformed event(s):`, JSON.stringify(rejected).slice(0, 400));
+  }
+  if (events.length === 0) {
+    return Response.json({ ok: false, accepted: 0, rejected }, { status: 400 });
+  }
+
   const handle = db();
 
   const upsertSession = handle.prepare(`
@@ -133,5 +157,9 @@ export async function POST(request: Request) {
     return Response.json({ error: "write failed" }, { status: 500 });
   }
 
-  return Response.json({ ok: true, accepted: events.length });
+  return Response.json({
+    ok: true,
+    accepted: events.length,
+    ...(rejected.length > 0 ? { rejected } : {}),
+  });
 }
