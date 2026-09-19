@@ -3,3 +3,5 @@ node_modules/
 .next/
 *.rbxl
 *.rbxlx
+BUILD_SPEC.md
+CLAUDE.md
