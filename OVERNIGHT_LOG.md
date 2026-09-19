@@ -6,13 +6,31 @@ Started 2026-09-19, working solo through BUILD_SPEC.md §13 (POCs) then §14 (sc
 
 _(Updated as work proceeds — read this section first in the morning.)_
 
-**RECORD THIS WHEN YOU WAKE UP:** POC 3 works. A standalone Node process
-(`bridge/sync-config.ts`) spawned `StudioMCP.exe` over stdio, completed the MCP
-handshake (28 tools), resolved the studio id, and ran Luau that wrote a new
-ModuleScript into the open place. That is the top tier of the fallback ladder
-proven end to end, and it was the single highest-risk item in the build.
+**RECORD THIS WHEN YOU WAKE UP — THE WHOLE LOOP WORKS.**
 
-Status: in progress, see phase log below.
+Observe → Understand → Change ran end to end, unattended, with no manual step:
+
+1. 2,012 simulated sessions (14k+ events) went through the ingest API into SQLite.
+2. The metrics layer turned them into the seven-stage funnel per product.
+3. `POST /api/insights` sent that to GPT-5.4, which found the planted problem
+   on its own: the $99.99 rugby shirt was starved of impressions in the
+   dead-corner slot, and it explicitly refused to judge its conversion on thin
+   data.
+4. The validator checked every op against the live registry: 2 accepted, 0 rejected.
+5. The plan was saved as `exp_01` and queued.
+6. The Bridge picked it up, took a rollback snapshot, and applied it to the
+   open place over MCP.
+7. **Verified in Studio: the rugby shirt moved Slot_G → Slot_F and the plush
+   goose moved Slot_F → Slot_G, and the world is now stamped `exp_01`.**
+
+You are on the **top tier of the fallback ladder**, not a fallback. Record a
+screen capture of this before changing anything.
+
+To re-run it yourself: `npm run dev` in `app/`, `npx tsx index.ts` in `bridge/`,
+open http://localhost:3000, press ANALYZE, then SAVE, then APPLY TO ROBLOX.
+
+Status: core loop done. Remaining: in-game telemetry Luau (the simulator
+covers the data path today), Shopify claim codes, before/after images.
 
 ---
 

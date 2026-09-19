@@ -69,6 +69,12 @@ CREATE TABLE IF NOT EXISTS orders (
   source TEXT NOT NULL DEFAULT 'live'
 );
 
+CREATE TABLE IF NOT EXISTS kv (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS claim_codes (
   code TEXT PRIMARY KEY,
   session_id TEXT,

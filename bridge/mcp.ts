@@ -5,7 +5,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const MCP_BAT = path.join(os.homedir(), "AppData", "Local", "Roblox", "mcp.bat");
 
-export type ToolResult = { text: string; isError: boolean };
+export type ToolResult = { text: string; isError: boolean; images: string[] };
 
 export class StudioBridge {
   private client: Client | null = null;
@@ -31,12 +31,13 @@ export class StudioBridge {
   async call(name: string, args: Record<string, unknown>): Promise<ToolResult> {
     if (!this.client) throw new Error("not connected");
     const res = await this.client.callTool({ name, arguments: args });
-    const content = (res.content ?? []) as { type: string; text?: string }[];
+    const content = (res.content ?? []) as { type: string; text?: string; data?: string }[];
     const text = content
       .filter((c) => c.type === "text")
       .map((c) => c.text ?? "")
       .join("\n");
-    return { text, isError: res.isError === true };
+    const images = content.filter((c) => c.type === "image" && c.data).map((c) => c.data as string);
+    return { text, isError: res.isError === true, images };
   }
 
   /** Studio MCP requires a studio_id on every call. Resolve and cache it. */

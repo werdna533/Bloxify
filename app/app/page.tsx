@@ -1,28 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { Analytics, ComponentRow } from "@/lib/types";
+import { StoreMap } from "@/components/StoreMap";
+import { FunnelTable } from "@/components/FunnelTable";
+import { ExperimentPanel } from "@/components/ExperimentPanel";
 
-type Stats = {
-  totals: { events: number; sessions: number };
-  bySource: { source: string; n: number }[];
-  byType: { type: string; n: number }[];
-  latest: { ts: number; type: string; componentId: string | null; source: string }[];
-  now: number;
-};
-
-export default function Home() {
-  const [stats, setStats] = useState<Stats | null>(null);
+export default function Lab() {
+  const [data, setData] = useState<Analytics | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [source, setSource] = useState<"all" | "sim" | "live">("all");
 
   useEffect(() => {
     let cancelled = false;
     const tick = async () => {
       try {
-        const res = await fetch("/api/stats", { cache: "no-store" });
+        const res = await fetch(`/api/analytics?heatmap=1&source=${source}`, { cache: "no-store" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as Stats;
+        const json = (await res.json()) as Analytics;
         if (!cancelled) {
-          setStats(data);
+          setData(json);
           setError(null);
         }
       } catch (e) {
@@ -30,67 +27,79 @@ export default function Home() {
       }
     };
     void tick();
-    const id = setInterval(tick, 2000);
+    const id = setInterval(tick, 4000);
     return () => {
       cancelled = true;
       clearInterval(id);
     };
-  }, []);
+  }, [source]);
+
+  const totals = useMemo(() => {
+    const rows = data?.components ?? [];
+    return rows.reduce(
+      (acc, r) => ({
+        impressions: acc.impressions + r.impressions,
+        approaches: acc.approaches + r.approaches,
+        interactions: acc.interactions + r.interactions,
+        panelOpens: acc.panelOpens + r.panelOpens,
+        ctaClicks: acc.ctaClicks + r.ctaClicks,
+        purchases: acc.purchases + r.purchases,
+      }),
+      { impressions: 0, approaches: 0, interactions: 0, panelOpens: 0, ctaClicks: 0, purchases: 0 },
+    );
+  }, [data]);
 
   return (
-    <main className="min-h-screen bg-neutral-950 p-8 font-mono text-neutral-200">
-      <h1 className="text-xl tracking-widest text-neutral-400">COMMERCE LAB — INGEST MONITOR</h1>
-      <p className="mt-1 text-xs text-neutral-600">POC 2: backend read path, refreshes every 2s</p>
+    <main className="min-h-screen bg-[#0f0f11] px-8 py-7 font-mono text-neutral-300">
+      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-neutral-800 pb-4">
+        <div>
+          <h1 className="text-lg tracking-[0.3em] text-neutral-100">COMMERCE LAB</h1>
+          <p className="mt-1 text-xs text-neutral-500">
+            Roblox &times; Shopify &mdash; observe, understand, change, test
+          </p>
+        </div>
+        <div className="flex items-center gap-4 text-xs">
+          <SourceToggle value={source} onChange={setSource} />
+          {data && <Provenance data={data} />}
+        </div>
+      </header>
 
       {error && <p className="mt-6 text-red-400">read failed: {error}</p>}
 
-      {stats && (
+      {data && (
         <>
-          <section className="mt-8 flex gap-10">
-            <Stat label="EVENTS" value={stats.totals.events} />
-            <Stat label="SESSIONS" value={stats.totals.sessions} />
+          <section className="mt-6 flex flex-wrap gap-8">
+            <Stat label="IMPRESSIONS" value={totals.impressions} hint="saw it" />
+            <Arrow />
+            <Stat label="APPROACHES" value={totals.approaches} hint="walked to it" />
+            <Arrow />
+            <Stat label="INTERACTIONS" value={totals.interactions} hint="touched it" />
+            <Arrow />
+            <Stat label="PANEL OPENS" value={totals.panelOpens} hint="wanted more" />
+            <Arrow />
+            <Stat label="CTA CLICKS" value={totals.ctaClicks} hint="wanted it" />
+            <Arrow />
+            <Stat label="PURCHASES" value={totals.purchases} hint="bought it" />
           </section>
 
-          <section className="mt-8">
-            <h2 className="text-xs tracking-widest text-neutral-500">BY SOURCE</h2>
-            <ul className="mt-2 text-sm">
-              {stats.bySource.length === 0 && <li className="text-neutral-600">none yet</li>}
-              {stats.bySource.map((row) => (
-                <li key={row.source}>
-                  <span className={row.source === "sim" ? "text-amber-400" : "text-emerald-400"}>
-                    {row.source === "sim" ? "SEEDED SIMULATION" : "LIVE SESSION"}
-                  </span>
-                  <span className="text-neutral-500"> — {row.n}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
+          <div className="mt-8 grid gap-8 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
+            <section>
+              <SectionTitle>STORE MAP</SectionTitle>
+              <StoreMap
+                slots={data.slots}
+                components={data.components}
+                heatmap={data.heatmap ?? []}
+              />
+            </section>
 
-          <section className="mt-8">
-            <h2 className="text-xs tracking-widest text-neutral-500">BY TYPE</h2>
-            <ul className="mt-2 text-sm">
-              {stats.byType.length === 0 && <li className="text-neutral-600">none yet</li>}
-              {stats.byType.map((row) => (
-                <li key={row.type}>
-                  {row.type} <span className="text-neutral-500">— {row.n}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
+            <section className="min-w-0">
+              <SectionTitle>FUNNEL BY PRODUCT</SectionTitle>
+              <FunnelTable rows={data.components} />
+            </section>
+          </div>
 
-          <section className="mt-8">
-            <h2 className="text-xs tracking-widest text-neutral-500">LATEST 10</h2>
-            <ul className="mt-2 text-xs text-neutral-400">
-              {stats.latest.map((row, i) => (
-                <li key={i}>
-                  {new Date(row.ts * 1000).toLocaleTimeString()} · {row.type} ·{" "}
-                  {row.componentId ?? "—"} ·{" "}
-                  <span className={row.source === "sim" ? "text-amber-500" : "text-emerald-500"}>
-                    {row.source}
-                  </span>
-                </li>
-              ))}
-            </ul>
+          <section className="mt-10">
+            <ExperimentPanel />
           </section>
         </>
       )}
@@ -98,11 +107,68 @@ export default function Home() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function Provenance({ data }: { data: Analytics }) {
+  const sim = data.sourceBreakdown.find((s) => s.source === "sim");
+  const live = data.sourceBreakdown.find((s) => s.source === "live");
   return (
-    <div>
-      <div className="text-xs tracking-widest text-neutral-500">{label}</div>
-      <div className="text-4xl text-neutral-100">{value.toLocaleString()}</div>
+    <div className="text-right leading-5">
+      <div>
+        <span className="text-amber-400">SEEDED SIMULATION</span>{" "}
+        <span className="text-neutral-500">
+          {sim ? `${sim.sessions} sessions / ${sim.events} events` : "none"}
+        </span>
+      </div>
+      <div>
+        <span className="text-emerald-400">LIVE SESSIONS</span>{" "}
+        <span className="text-neutral-500">
+          {live ? `${live.sessions} sessions / ${live.events} events` : "none"}
+        </span>
+      </div>
     </div>
   );
 }
+
+function SourceToggle({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: "all" | "sim" | "live") => void;
+}) {
+  const options: ("all" | "sim" | "live")[] = ["all", "sim", "live"];
+  return (
+    <div className="flex overflow-hidden rounded border border-neutral-700">
+      {options.map((o) => (
+        <button
+          key={o}
+          onClick={() => onChange(o)}
+          className={`px-3 py-1 uppercase tracking-wider ${
+            value === o ? "bg-neutral-200 text-neutral-900" : "text-neutral-400 hover:bg-neutral-800"
+          }`}
+        >
+          {o}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return <h2 className="mb-3 text-xs tracking-[0.25em] text-neutral-500">{children}</h2>;
+}
+
+function Stat({ label, value, hint }: { label: string; value: number; hint: string }) {
+  return (
+    <div>
+      <div className="text-[10px] tracking-[0.2em] text-neutral-500">{label}</div>
+      <div className="text-3xl text-neutral-100">{value.toLocaleString()}</div>
+      <div className="text-[10px] text-neutral-600">{hint}</div>
+    </div>
+  );
+}
+
+function Arrow() {
+  return <div className="self-center pt-3 text-neutral-700">&rarr;</div>;
+}
+
+export type { ComponentRow };
