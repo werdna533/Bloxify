@@ -200,6 +200,59 @@ function ComponentLibrary.build(spec: { [string]: any }): Model
 	return model
 end
 
+--[[
+	Replaces a display's placeholder geometry with a generated model, keeping
+	the pedestal, sign, billboard and prompt intact.
+
+	The placeholder shapes exist so the funnel can be measured before any art
+	exists; this swaps in the real thing once it has been generated from the
+	product photo, without disturbing anything telemetry depends on.
+]]
+local PLACEHOLDER_PARTS = {
+	"Body", "Neck", "Head", "Beak",
+	"Legs", "Torso", "ArmLeft", "ArmRight",
+	"Garment", "GarmentSleeveL", "GarmentSleeveR",
+}
+
+function ComponentLibrary.attachProductArt(model: Model, source: Model, targetHeight: number?)
+	local root = model.PrimaryPart
+	if not root then return false, "component has no PrimaryPart" end
+
+	local existing = model:FindFirstChild("ProductArt")
+	if existing then existing:Destroy() end
+	for _, name in ipairs(PLACEHOLDER_PARTS) do
+		local part = model:FindFirstChild(name)
+		if part then part:Destroy() end
+	end
+
+	local art = source:Clone()
+	art.Name = "ProductArt"
+	art.Parent = model
+
+	local _, size = art:GetBoundingBox()
+	local height = targetHeight or 3
+	if size.Y > 0.001 then
+		art:ScaleTo(height / size.Y)
+	end
+
+	local _, scaled = art:GetBoundingBox()
+	local top = root.Position.Y + root.Size.Y / 2
+	local centre = Vector3.new(root.Position.X, top + scaled.Y / 2, root.Position.Z)
+	art:PivotTo(CFrame.lookAt(centre, centre + model:GetPivot().LookVector))
+
+	-- Generated parts arrive unanchored and collidable, which would drop them
+	-- through the floor and let players shove the merchandise around.
+	for _, d in ipairs(art:GetDescendants()) do
+		if d:IsA("BasePart") then
+			d.Anchored = true
+			d.CanCollide = false
+		end
+	end
+
+	model:SetAttribute("artSource", "generated_from_shopify_image")
+	return true
+end
+
 -- Keeps the sign and billboard in step with the model's attributes.
 function ComponentLibrary.refreshText(model: Model)
 	local sign = model:FindFirstChild("Sign")
