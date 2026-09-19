@@ -207,6 +207,12 @@ function ComponentLibrary.build(spec: { [string]: any }): Model
 	model:SetAttribute("ctaText", spec.ctaText or "View")
 	model:SetAttribute("signageText", spec.signageText or spec.title or "")
 	model:SetAttribute("garmentColour", spec.garmentColour or SHELL)
+	model:SetAttribute("imageAssetId", spec.imageAssetId)
+	-- Populated once the AI-composited texture pipeline exists; until then,
+	-- Try On falls back to a stock catalog template so the mechanism is
+	-- demonstrable today without pretending it is the real product.
+	model:SetAttribute("shirtTemplateId", spec.shirtTemplateId)
+	model:SetAttribute("pantsTemplateId", spec.pantsTemplateId)
 	model:SetAttribute("garmentOnLegs", spec.garmentOnLegs == true)
 
 	ComponentLibrary.refreshText(model)
