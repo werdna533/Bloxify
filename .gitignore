@@ -18,3 +18,12 @@ worker/.env
 .dev.vars
 worker/.wrangler/
 worker/node_modules/
+
+# generated presentation artifacts
+/demo-script.html
+/systems-diagram.html
+
+# hackathon-only docs, not needed post-event
+OVERNIGHT_LOG.md
+app/AGENTS.md
+worker/migrations/
