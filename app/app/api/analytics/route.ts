@@ -23,17 +23,17 @@ export async function GET(request: Request) {
 
   const registry = await readRegistry();
   const metrics = componentMetrics(experimentId, source);
-  const bySlot = new Map(registry?.components.map((c) => [c.componentId, c]) ?? []);
-  const rankBySlot = new Map(registry?.slots.map((s) => [s.slotId, s.trafficRank]) ?? []);
+  const byComponent = new Map(registry?.components.map((c) => [c.componentId, c]) ?? []);
 
   const rows = metrics.map((m) => {
-    const component = bySlot.get(m.componentId);
+    const component = byComponent.get(m.componentId);
     return {
       ...m,
       title: component?.title ?? m.componentId,
       price: component?.price ?? null,
-      slotId: component?.slotId ?? null,
-      trafficRank: component ? (rankBySlot.get(component.slotId) ?? null) : null,
+      pos: component?.pos ?? null,
+      facing: component?.facing ?? null,
+      visibilityScore: component?.visibilityScore ?? null,
       kind: component?.kind ?? null,
       prominence: component?.prominence ?? null,
     };
@@ -44,7 +44,8 @@ export async function GET(request: Request) {
     source,
     experiments: experimentIds(),
     sourceBreakdown: sourceBreakdown(experimentId),
-    slots: registry?.slots ?? [],
+    region: registry?.region ?? null,
+    hasStorefront: registry?.hasStorefront ?? false,
     place: registry?.place ?? null,
     components: rows,
     heatmap: wantHeatmap ? heatmap(experimentId, source) : undefined,

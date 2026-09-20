@@ -135,7 +135,6 @@ export async function GET(request: Request) {
       componentId: c.componentId,
       title: c.title,
       price: c.price,
-      slotId: c.slotId,
       pos: c.pos,
       impressions,
       approaches,
@@ -192,6 +191,6 @@ export async function GET(request: Request) {
     tabFlows,
     items: classified,
     thresholds: { pullMedian, intentMedian },
-    slots: registry?.slots ?? [],
+    region: registry?.region ?? null,
   });
 }

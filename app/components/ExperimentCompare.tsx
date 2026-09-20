@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { InfoTip } from "@/components/ui";
 
 type Change = {
   metric: string;
@@ -41,6 +42,7 @@ export function ExperimentCompare({
   const [data, setData] = useState<Comparison | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (experiments.length >= 2) {
@@ -72,11 +74,27 @@ export function ExperimentCompare({
     void load();
   }, [load]);
 
+  // Detail starts open for whatever this plan actually touched -- that's the
+  // interesting part -- and collapsed for everything else, so a five-product
+  // store doesn't turn into five full tables on load.
+  useEffect(() => {
+    if (data) setExpanded(new Set(data.touchedComponents));
+  }, [data]);
+
+  const toggle = (componentId: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(componentId)) next.delete(componentId);
+      else next.add(componentId);
+      return next;
+    });
+  };
+
   if (experiments.length < 2) {
     return (
       <div className="rbx-card p-5">
-        <h2 className="text-[15px] font-bold">Experiment result</h2>
-        <p className="mt-2 text-xs text-[var(--rbx-dim)]">
+        <h2 className="text-[17px] font-bold">Experiment result</h2>
+        <p className="mt-2 text-sm text-[var(--rbx-dim)]">
           Needs two experiments to compare. Run one and collect some sessions against it.
         </p>
       </div>
@@ -93,13 +111,11 @@ export function ExperimentCompare({
   return (
     <div className="rbx-card p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-[15px] font-bold">Experiment result</h2>
-          <p className="mt-0.5 text-xs text-[var(--rbx-dim)]">
-            Did the change do what the model expected?
-          </p>
-        </div>
-        <div className="flex items-center gap-2 text-xs">
+        <h2 className="flex items-center gap-2 text-[17px] font-bold">
+          Experiment result
+          <InfoTip align="left" text="Did the change do what the model expected? Compares real player behaviour from before an experiment was applied to after." />
+        </h2>
+        <div className="flex items-center gap-2 text-sm">
           <Picker value={before} onChange={setBefore} options={experiments} label="before" />
           <span className="text-[var(--rbx-faint)]">&rarr;</span>
           <Picker value={after} onChange={setAfter} options={experiments} label="after" />
@@ -113,20 +129,15 @@ export function ExperimentCompare({
         <>
           {data.hypothesis && (
             <div className="rbx-inset mt-4 p-3">
-              <div className="rbx-label mb-1">WHAT THE MODEL PREDICTED</div>
+              <div className="rbx-label mb-1">What the model predicted</div>
               <p className="text-sm">{data.hypothesis}</p>
             </div>
           )}
 
-          <p className="mt-3 text-[11px] text-[var(--rbx-faint)]">
-            {data.beforeSessions.toLocaleString()} sessions before ·{" "}
-            {data.afterSessions.toLocaleString()} after. Counts are compared per session; rates are
-            compared directly.
-          </p>
-
           <div className="mt-4 space-y-4">
             {ordered.map((component) => {
               const isTouched = touched.has(component.componentId);
+              const isOpen = expanded.has(component.componentId);
               return (
                 <div
                   key={component.componentId}
@@ -135,47 +146,56 @@ export function ExperimentCompare({
                     background: isTouched ? "var(--rbx-overlay-strong)" : "var(--rbx-overlay)",
                   }}
                 >
-                  <div className="mb-2 flex items-center gap-2">
+                  <button
+                    onClick={() => toggle(component.componentId)}
+                    className="flex w-full items-center gap-2 text-left"
+                  >
+                    <span className="text-[var(--rbx-dim)]">{isOpen ? "▾" : "▸"}</span>
                     <span className="text-sm font-semibold">{component.title}</span>
                     {isTouched && (
                       <span
                         className="rbx-pill"
                         style={{ background: "var(--rbx-accent)", color: "#fff" }}
                       >
-                        CHANGED BY THIS PLAN
+                        Changed by this plan
                       </span>
                     )}
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[620px] border-collapse text-xs">
-                      <thead>
-                        <tr className="text-left text-[var(--rbx-faint)]">
-                          <th className="py-1 pr-3 font-normal">metric</th>
-                          <th className="py-1 pr-3 font-normal">before</th>
-                          <th className="py-1 pr-3 font-normal">after</th>
-                          <th className="py-1 pr-3 font-normal">per session</th>
-                          <th className="py-1 font-normal">change</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {component.changes.map((c) => (
-                          <tr key={c.key} className="border-t border-[var(--rbx-line)]">
-                            <td className="py-1.5 pr-3 text-[var(--rbx-dim)]">{c.metric}</td>
-                            <td className="py-1.5 pr-3">{fmt(c.rawBefore, c.isRate)}</td>
-                            <td className="py-1.5 pr-3">{fmt(c.rawAfter, c.isRate)}</td>
-                            <td className="py-1.5 pr-3 text-[var(--rbx-faint)]">
-                              {c.isRate
-                                ? "—"
-                                : `${c.perSessionBefore ?? "—"} → ${c.perSessionAfter ?? "—"}`}
-                            </td>
-                            <td className="py-1.5">
-                              <Delta pct={c.pctChange} />
-                            </td>
+                    <span className="ml-auto text-xs text-[var(--rbx-faint)]">
+                      {isOpen ? "hide details" : "show details"}
+                    </span>
+                  </button>
+                  {isOpen && (
+                    <div className="mt-2 overflow-x-auto">
+                      <table className="w-full min-w-[620px] border-collapse text-sm">
+                        <thead>
+                          <tr className="text-left text-[var(--rbx-faint)]">
+                            <th className="py-1 pr-3 font-normal">metric</th>
+                            <th className="py-1 pr-3 font-normal">before</th>
+                            <th className="py-1 pr-3 font-normal">after</th>
+                            <th className="py-1 pr-3 font-normal">per session</th>
+                            <th className="py-1 font-normal">change</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                        </thead>
+                        <tbody>
+                          {component.changes.map((c) => (
+                            <tr key={c.key} className="border-t border-[var(--rbx-line)]">
+                              <td className="py-1.5 pr-3 text-[var(--rbx-dim)]">{c.metric}</td>
+                              <td className="py-1.5 pr-3">{fmt(c.rawBefore, c.isRate)}</td>
+                              <td className="py-1.5 pr-3">{fmt(c.rawAfter, c.isRate)}</td>
+                              <td className="py-1.5 pr-3 text-[var(--rbx-faint)]">
+                                {c.isRate
+                                  ? "—"
+                                  : `${c.perSessionBefore ?? "—"} → ${c.perSessionAfter ?? "—"}`}
+                              </td>
+                              <td className="py-1.5">
+                                <Delta pct={c.pctChange} />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -216,13 +236,12 @@ function Picker({
   label: string;
 }) {
   return (
-    <label className="flex items-center gap-1">
+    <label className="flex items-center gap-1.5">
       <span className="rbx-label">{label}</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded-[6px] px-2 py-1 text-xs"
-        style={{ background: "var(--rbx-overlay)", color: "var(--rbx-text)" }}
+        className="rbx-select rounded-[6px] px-2 py-1 text-sm"
       >
         {options.map((o) => (
           <option key={o} value={o}>

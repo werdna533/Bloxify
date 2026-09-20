@@ -12,9 +12,11 @@
   --rbx-overlay-strong: rgba(208, 217, 251, 0.12);
   --rbx-accent: #335fff;
   --rbx-text: #ffffff;
-  --rbx-dim: rgba(255, 255, 255, 0.62);
-  --rbx-faint: rgba(255, 255, 255, 0.4);
-  --rbx-line: rgba(255, 255, 255, 0.08);
+  /* Kept close to white on purpose -- hierarchy comes from size/weight, not
+     from dimming text into illegible grey. */
+  --rbx-dim: rgba(255, 255, 255, 0.85);
+  --rbx-faint: rgba(255, 255, 255, 0.62);
+  --rbx-line: rgba(255, 255, 255, 0.12);
 
   --rbx-radius: 8px;
   --rbx-radius-lg: 12px;
@@ -44,6 +46,23 @@ body {
 .rbx-inset {
   background: var(--rbx-overlay);
   border-radius: var(--rbx-radius);
+}
+
+.rbx-select {
+  appearance: auto;
+  background: var(--rbx-surface);
+  border: 1px solid var(--rbx-line);
+  color: var(--rbx-text);
+  color-scheme: dark;
+  outline: none;
+}
+.rbx-select:focus {
+  border-color: var(--rbx-accent);
+  box-shadow: 0 0 0 2px rgba(51, 95, 255, 0.24);
+}
+.rbx-select option {
+  background: var(--rbx-surface);
+  color: var(--rbx-text);
 }
 
 .rbx-nav-item {
@@ -107,7 +126,7 @@ body {
 }
 
 .rbx-label {
-  font-size: 0.6875rem;
-  color: var(--rbx-faint);
+  font-size: 0.75rem;
+  color: var(--rbx-dim);
   letter-spacing: 0.04em;
 }

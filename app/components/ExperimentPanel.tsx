@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Experiment, Plan, Validation } from "@/lib/types";
+import { InfoTip } from "@/components/ui";
 
 type Insight = {
   plan: Plan;
@@ -17,6 +18,16 @@ export function ExperimentPanel() {
   const [error, setError] = useState<string | null>(null);
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [savedId, setSavedId] = useState<string | null>(null);
+  const [openHistory, setOpenHistory] = useState<Set<string>>(new Set());
+
+  const toggleHistory = (id: string) => {
+    setOpenHistory((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const refresh = useCallback(async () => {
     const res = await fetch("/api/experiments", { cache: "no-store" });
@@ -38,7 +49,7 @@ export function ExperimentPanel() {
       const res = await fetch("/api/insights", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: "all" }),
+        body: JSON.stringify({ source: "live" }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
@@ -90,13 +101,30 @@ export function ExperimentPanel() {
 
   const apply = (id: string) => act(id, "apply");
 
+  const remove = async (id: string) => {
+    setBusy(`delete-${id}`);
+    try {
+      const res = await fetch(`/api/experiments/${id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div className="rbx-card p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-[15px] font-bold">Run an experiment</h2>
-          <p className="mt-0.5 text-xs text-[var(--rbx-dim)]">The model proposes, the validator decides, the Bridge applies.</p>
-        </div>
+        <h2 className="flex items-center gap-2 text-[17px] font-bold">
+          Run an experiment
+          <InfoTip
+            align="left"
+            text="An experiment is one proposed change to the storefront -- move a display, change a button's text, and so on -- generated from real player behaviour. The AI proposes it, a validator checks it's safe and legal before anything happens, and only then does it get applied to the live Roblox place so you can measure whether it actually helped."
+          />
+        </h2>
         <button
           onClick={analyze}
           disabled={busy === "analyze"}
@@ -110,8 +138,8 @@ export function ExperimentPanel() {
 
       {insight && (
         <div className="mt-5 space-y-4 text-sm">
-          <Field label="HYPOTHESIS">{insight.plan.hypothesis}</Field>
-          <Field label="EVIDENCE">
+          <Field label="Hypothesis">{insight.plan.hypothesis}</Field>
+          <Field label="Evidence">
             <ul className="space-y-1">
               {insight.plan.evidence.map((e, i) => (
                 <li key={i} className="text-[var(--rbx-dim)]">
@@ -121,16 +149,16 @@ export function ExperimentPanel() {
             </ul>
           </Field>
           <div className="flex gap-10">
-            <Field label="CONFIDENCE">
-              <span className="uppercase">{insight.plan.confidence}</span>
+            <Field label="Confidence">
+              <span className="capitalize">{insight.plan.confidence}</span>
             </Field>
-            <Field label="MODEL">
+            <Field label="Model">
               <span className="text-[var(--rbx-dim)]">{insight.model}</span>
             </Field>
           </div>
-          <Field label="EXPECTED EFFECT">{insight.plan.expectedEffect}</Field>
+          <Field label="Expected effect">{insight.plan.expectedEffect}</Field>
 
-          <Field label="INTERVENTION">
+          <Field label="Intervention">
             <ul className="space-y-1">
               {insight.validation.accepted.map((op, i) => (
                 <li key={i} className="text-emerald-300">
@@ -145,7 +173,7 @@ export function ExperimentPanel() {
               ))}
             </ul>
             {insight.validation.rejected.length > 0 && (
-              <p className="mt-2 text-[10px] text-[var(--rbx-dim)]">
+              <p className="mt-2 text-xs text-[var(--rbx-dim)]">
                 Rejected operations are never sent to Roblox.
               </p>
             )}
@@ -174,40 +202,112 @@ export function ExperimentPanel() {
 
       {experiments.length > 0 && (
         <div className="mt-7 border-t border-[var(--rbx-line)] pt-4">
-          <h3 className="rbx-label mb-3">HISTORY</h3>
-          <ul className="space-y-2 text-xs">
-            {experiments.map((e) => (
-              <li key={e.id} className="flex flex-wrap items-center gap-3">
-                <span className="text-[var(--rbx-text)]">{e.id}</span>
-                <StatusPill status={e.status} />
-                <span className="min-w-0 flex-1 truncate text-[var(--rbx-dim)]">{e.hypothesis}</span>
-                {(e.status === "draft" || e.status === "failed") && (
-                  <button
-                    onClick={() => apply(e.id)}
-                    disabled={busy !== null}
-                    className="rounded-[6px] px-2 py-1 text-[10px] font-semibold" style={{ background: "var(--rbx-overlay-strong)" }}
-                  >
-                    Apply
-                  </button>
-                )}
-                {e.snapshot_before_json && e.status !== "rolling_back" && (
-                  <button
-                    onClick={() => act(e.id, "rollback")}
-                    disabled={busy !== null}
-                    className="rounded-[6px] px-2 py-1 text-[10px] font-semibold text-amber-300" style={{ background: "rgba(245,158,11,0.14)" }}
-                    title="Restore the snapshot taken before this apply"
-                  >
-                    Roll back
-                  </button>
-                )}
-                {e.error && <span className="text-red-400">{e.error}</span>}
-              </li>
-            ))}
-          </ul>
+          <h3 className="rbx-label mb-3">History</h3>
+          <div className="space-y-2 text-sm">
+            {experiments.map((e) => {
+              const isOpen = openHistory.has(e.id);
+              const canApply = e.status === "draft" || e.status === "failed";
+              // Boolean(...), not a bare truthiness check -- the backend can send
+              // snapshot_before_json as the number 0, and `{0 && <button/>}` in
+              // JSX renders the literal text "0" instead of nothing.
+              const canRollback =
+                Boolean(e.snapshot_before_json) && e.status !== "rolling_back" && e.status !== "rolled_back";
+              let ops: Record<string, unknown>[] = [];
+              try {
+                ops = (JSON.parse(e.plan_json ?? "{}").ops ?? []) as Record<string, unknown>[];
+              } catch {
+                // Malformed plan_json shouldn't take down the whole history list.
+              }
+
+              return (
+                <div key={e.id} className="rounded-[8px] p-3" style={{ background: "var(--rbx-overlay)" }}>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      onClick={() => toggleHistory(e.id)}
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    >
+                      <span className="text-[var(--rbx-dim)]">{isOpen ? "▾" : "▸"}</span>
+                      <span className="text-[var(--rbx-text)]">{e.id}</span>
+                      <StatusPill status={e.status} />
+                      <span className="min-w-0 flex-1 truncate text-[var(--rbx-dim)]">{e.hypothesis}</span>
+                    </button>
+                    {canApply && (
+                      <button
+                        onClick={() => apply(e.id)}
+                        disabled={busy !== null}
+                        className="rounded-[6px] px-2 py-1 text-xs font-semibold text-white"
+                        style={{ background: "var(--rbx-accent)" }}
+                      >
+                        Apply
+                      </button>
+                    )}
+                    {canRollback && (
+                      <button
+                        onClick={() => act(e.id, "rollback")}
+                        disabled={busy !== null}
+                        className="rounded-[6px] px-2 py-1 text-xs font-semibold text-amber-300"
+                        style={{ background: "rgba(245,158,11,0.14)" }}
+                        title="Restore the snapshot taken before this apply"
+                      >
+                        Roll back
+                      </button>
+                    )}
+                    {e.error && !isOpen && (
+                      <span className="text-xs text-red-400">{e.error}</span>
+                    )}
+                    {e.status !== "applying" && e.status !== "rolling_back" && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`Delete experiment ${e.id}? This can't be undone.`)) void remove(e.id);
+                        }}
+                        disabled={busy !== null}
+                        className="rounded-[6px] px-2 py-1 text-xs font-semibold text-red-400 hover:bg-red-500/10"
+                        title="Delete this experiment record"
+                      >
+                        Delete
+                      </button>
+                    )}
+                    <button
+                      onClick={() => toggleHistory(e.id)}
+                      className="text-xs text-[var(--rbx-faint)]"
+                    >
+                      {isOpen ? "hide details" : "show details"}
+                    </button>
+                  </div>
+
+                  {isOpen && (
+                    <div className="mt-3 space-y-3 border-t border-[var(--rbx-line)] pt-3">
+                      <Field label="Hypothesis">{e.hypothesis}</Field>
+                      {ops.length > 0 && (
+                        <Field label="Operations">
+                          <ul className="space-y-1">
+                            {ops.map((op, i) => (
+                              <li key={i} className="text-[var(--rbx-dim)]">
+                                &bull; {describeOp(op)}
+                              </li>
+                            ))}
+                          </ul>
+                        </Field>
+                      )}
+                      {e.error && <Field label="Error"><span className="text-red-400">{e.error}</span></Field>}
+                      <p className="text-xs text-[var(--rbx-faint)]">
+                        created {new Date(e.created_at * 1000).toLocaleString()}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
   );
+}
+
+function formatStatus(status: string): string {
+  const spaced = status.replace(/_/g, " ");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -221,8 +321,8 @@ function StatusPill({ status }: { status: string }) {
           ? "bg-amber-500/20 text-amber-300"
           : "bg-neutral-700/40 text-[var(--rbx-dim)]";
   return (
-    <span className={`rounded px-2 py-0.5 text-[10px] tracking-wider ${colour}`}>
-      {status.toUpperCase()}
+    <span className={`rounded px-2 py-0.5 text-xs font-semibold tracking-wider ${colour}`}>
+      {formatStatus(status)}
       {index >= 0 && status !== "done" && (
         <span className="text-[var(--rbx-faint)]"> {index + 1}/{STAGES.length}</span>
       )}
@@ -242,8 +342,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function describeOp(op: Record<string, unknown>): string {
   const name = String(op.op);
   switch (name) {
-    case "move_to_slot":
-      return `move ${op.componentId} to ${op.slotId}`;
+    case "move_to_position":
+      return `move ${op.componentId} to (${op.x}, ${op.z})${op.facingDegrees != null ? ` facing ${op.facingDegrees}°` : ""}`;
     case "set_prominence":
       return `set ${op.componentId} prominence to ${op.level}`;
     case "set_cta_text":

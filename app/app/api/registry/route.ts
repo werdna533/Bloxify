@@ -4,29 +4,31 @@ import { env, requireAuth } from "@/lib/env";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+export type Region = {
+  center: number[]; // [x, z]
+  size: number[]; // [x, z]
+  rotationY: number;
+  floorY: number;
+};
+
 export type Registry = {
-  slots: {
-    slotId: string;
-    trafficRank: number;
-    visibilityScore?: number | null;
-    pos: number[];
-    facing: number[];
-  }[];
   components: {
     componentId: string;
     productId: string;
     title: string;
     price: number;
-    slotId: string;
     kind: string;
     prominence: number;
     interactionEnabled: boolean;
     ctaText?: string;
     signageText?: string;
+    visibilityScore?: number | null;
     pos: number[];
     facing: number[];
   }[];
+  region: Region | null;
   kinds: string[];
+  hasStorefront: boolean;
   experimentId: string;
   place?: { name: string; placeId: number; gameId: number };
 };
@@ -70,8 +72,8 @@ export async function POST(request: Request) {
   if (!auth.ok) return auth.response;
 
   const body = (await request.json()) as Registry;
-  if (!Array.isArray(body?.slots) || !Array.isArray(body?.components)) {
-    return Response.json({ error: "expected { slots, components }" }, { status: 400 });
+  if (!Array.isArray(body?.components)) {
+    return Response.json({ error: "expected { components }" }, { status: 400 });
   }
 
   if (env.workerUrl) {
@@ -92,7 +94,6 @@ export async function POST(request: Request) {
 
   return Response.json({
     ok: true,
-    slots: body.slots.length,
     components: body.components.length,
   });
 }

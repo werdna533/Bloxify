@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 /**
  * Shared shells matching the Creator Dashboard: bordered cards, a heading with
@@ -27,30 +28,60 @@ export function Card({
   );
 }
 
-export function InfoTip({ text }: { text: string }) {
+const TOOLTIP_WIDTH = 190;
+const VIEWPORT_MARGIN = 12;
+
+/**
+ * Rendered through a portal at a fixed, viewport-computed position instead of
+ * absolute-inside-the-trigger -- a tooltip inside a horizontally scrollable
+ * table (FunnelTable) would otherwise be clipped by, or add to, that
+ * container's scroll width. This way it always overlays on top, unclipped.
+ */
+export function InfoTip({ text, align = "center" }: { text: string; align?: "center" | "left" }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+
+  const show = () => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const rawLeft = align === "left" ? rect.left : rect.left + rect.width / 2 - TOOLTIP_WIDTH / 2;
+    const left = Math.min(
+      Math.max(rawLeft, VIEWPORT_MARGIN),
+      window.innerWidth - TOOLTIP_WIDTH - VIEWPORT_MARGIN,
+    );
+    setPos({ top: rect.bottom + 6, left });
+    setOpen(true);
+  };
+  const hide = () => setOpen(false);
+
   return (
     <span className="relative inline-flex items-center">
       <button
+        ref={buttonRef}
         type="button"
         aria-label={text}
-        onMouseEnter={() => setOpen(true)}
-        onMouseLeave={() => setOpen(false)}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
-        onClick={() => setOpen((v) => !v)}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={show}
+        onBlur={hide}
+        onClick={() => (open ? hide() : show())}
         className="grid h-[18px] w-[18px] place-items-center rounded-full border border-[rgba(255,255,255,0.28)] text-[11px] leading-none text-[var(--rbx-dim)] hover:border-[rgba(255,255,255,0.55)] hover:text-white"
       >
         i
       </button>
-      {open && (
-        <span
-          role="tooltip"
-          className="absolute left-1/2 top-[26px] z-50 w-[260px] -translate-x-1/2 rounded-[8px] border border-[var(--rbx-line)] bg-[#2A2C33] px-3 py-2 text-[12px] font-normal leading-5 text-[var(--rbx-text)] shadow-lg"
-        >
-          {text}
-        </span>
-      )}
+      {open &&
+        pos &&
+        createPortal(
+          <span
+            role="tooltip"
+            style={{ top: pos.top, left: pos.left, width: TOOLTIP_WIDTH }}
+            className="fixed z-[999] rounded-[8px] border border-[var(--rbx-line)] bg-[#2A2C33] px-2.5 py-2 text-[12px] font-normal leading-5 text-[var(--rbx-text)] shadow-lg"
+          >
+            {text}
+          </span>,
+          document.body,
+        )}
     </span>
   );
 }
