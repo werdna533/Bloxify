@@ -17,7 +17,6 @@ const BANNED_SUBSTRINGS = ["http://", "https://", "www.", "<", ">"];
  */
 export function validatePlan(plan: Plan, registry: Registry): ValidationResult {
   const componentIds = new Set(registry.components.map((c) => c.componentId));
-  const slotIds = new Set(registry.slots.map((s) => s.slotId));
   const kinds = new Set(registry.kinds);
 
   const accepted: Record<string, unknown>[] = [];
@@ -33,7 +32,7 @@ export function validatePlan(plan: Plan, registry: Registry): ValidationResult {
   const intents = new Map<string, string[]>();
   const intentOf = (op: Op): string | null => {
     if (op.op === "enable_interaction" || op.op === "disable_interaction") return "interaction";
-    if (op.op === "move_to_slot") return "placement";
+    if (op.op === "move_to_position") return "placement";
     if (op.op === "set_prominence") return "prominence";
     return null;
   };
@@ -53,10 +52,28 @@ export function validatePlan(plan: Plan, registry: Registry): ValidationResult {
       continue;
     }
 
-    if (op.op === "move_to_slot") {
-      if (!op.slotId || !slotIds.has(op.slotId)) {
-        reject(`slotId "${op.slotId}" is not in the live registry`);
+    if (op.op === "move_to_position") {
+      if (typeof op.x !== "number" || typeof op.z !== "number" || !Number.isFinite(op.x) || !Number.isFinite(op.z)) {
+        reject("x and z must be finite numbers");
         continue;
+      }
+      const facing = op.facingDegrees ?? 0;
+      if (!Number.isFinite(facing) || facing < 0 || facing > 360) {
+        reject(`facingDegrees ${facing} is outside 0-360`);
+        continue;
+      }
+      if (registry.region) {
+        const [cx, cz] = registry.region.center;
+        const [sx, sz] = registry.region.size;
+        const rad = (-registry.region.rotationY * Math.PI) / 180;
+        const dx = op.x - cx;
+        const dz = op.z - cz;
+        const localX = dx * Math.cos(rad) - dz * Math.sin(rad);
+        const localZ = dx * Math.sin(rad) + dz * Math.cos(rad);
+        if (Math.abs(localX) > sx / 2 || Math.abs(localZ) > sz / 2) {
+          reject(`(${op.x}, ${op.z}) is outside the storefront region`);
+          continue;
+        }
       }
     }
 

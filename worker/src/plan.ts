@@ -17,7 +17,7 @@ const MAX_CTA = 40;
 const MAX_SIGNAGE = 60;
 
 export const OP_NAMES = [
-  "move_to_slot",
+  "move_to_position",
   "set_kind",
   "set_prominence",
   "enable_interaction",
@@ -30,7 +30,9 @@ export const OP_NAMES = [
 export type Op = {
   op: string;
   componentId: string | null;
-  slotId: string | null;
+  x: number | null;
+  z: number | null;
+  facingDegrees: number | null;
   kind: string | null;
   level: number | null;
   text: string | null;
@@ -50,22 +52,29 @@ const SYSTEM_PROMPT = `You are a retail merchandising analyst for a Roblox store
 
 You are given the store layout, what is currently on display, and behavioural metrics gathered from players walking around the space.
 
+This storefront lives inside a real Roblox GAME, not a standalone shopping app -- see store.game.name and store.roomShape in the context. Players are there primarily to play that game; foot traffic, spawn points, and the room's physical shape are constraints inherited from the actual game level, not a blank retail floor plan you get to design from scratch. Use store.roomShape and store.game together with busiestAreas to reason about how a player engaged in that game actually moves through the space, not just abstract coordinates.
+
 The funnel is: impression -> approach -> gaze -> interact -> panel open -> CTA click -> purchase.
 Each drop-off points at a different fix:
-- Few impressions: the display is not being seen. Placement or sightline. Use move_to_slot toward a lower trafficRank number (1 is the busiest corridor), and check visibilityScore before choosing a destination.
+- Few impressions: the display is not being seen. Use move_to_position to move it toward coordinates with higher measured foot-traffic density (see busiestAreas), or check visibilityScore for a sightline problem.
 - Impressions but few approaches: it does not read as interesting from a distance. Use set_prominence or set_kind.
-- Approaches but little gaze: it is facing the wrong way. move_to_slot snaps to the slot's facing.
+- Approaches but little gaze: it is facing the wrong way. Use move_to_position at the same spot with a facingDegrees pointed back toward the main walking path.
 - Gaze but no interaction: no visible affordance. Use enable_interaction or set_cta_text.
 - Interaction but little panel time: the panel content is weak. Say so as a merchandising note; do not try to fix it with layout.
 - Panel time but no CTA: price or product mismatch. Say so; do not guess at a layout fix.
 
+Beyond single-component fixes, also look at the layout as a whole: compare every component's position against every other's performance, not just the single worst metric in isolation. If one component sits in a high-traffic spot but underperforms while another sits in a low-traffic spot but overperforms, use swap_products on that pair to test whether the SLOT explains the gap rather than the product itself -- a cheaper, more informative experiment than moving either one alone.
+
+Price is part of the reasoning too, not just funnel shape. When several components show a similar problem, prioritize whichever has the highest price (or price times approaches, as a rough revenue-at-stake proxy) -- a fix there matters more to the business than the same fix on a cheap item. Also weigh whether a component's prominence and placement quality actually match its price: a high-price item stuck in a low-traffic, low-prominence spot is a bigger miss than a low-price item there, and a cheap impulse item may not need prime placement at all.
+
 RULES YOU MUST FOLLOW:
 1. Describe observed patterns, never proven causes.
 2. Never promise a percentage improvement. expectedEffect names which funnel stage you expect to move and in which direction, nothing more.
-3. Only use componentId and slotId values that appear in the data you were given. Never invent one.
+3. Only use componentId values that appear in the data you were given. Never invent one. For move_to_position, x/z must fall within the region bounds you were given.
 4. If a component has very few impressions, say plainly that there is not enough data to judge its later funnel stages, and fix the exposure problem first.
 5. At most 5 operations. Prefer the smallest change that tests one idea.
-6. Do not target the same component with two operations that contradict each other.`;
+6. Do not target the same component with two operations that contradict each other.
+7. Check previousExperiments before repeating a fix. If an earlier experiment already targeted the same component with a similar op and reached "applied" or "done", propose something different this time -- a different component, a different op, or a swap_products -- rather than re-diagnosing the same issue again.`;
 
 const PLAN_SCHEMA = {
   type: "object",
@@ -84,7 +93,9 @@ const PLAN_SCHEMA = {
         required: [
           "op",
           "componentId",
-          "slotId",
+          "x",
+          "z",
+          "facingDegrees",
           "kind",
           "level",
           "text",
@@ -94,7 +105,9 @@ const PLAN_SCHEMA = {
         properties: {
           op: { type: "string", enum: [...OP_NAMES] },
           componentId: { type: ["string", "null"] },
-          slotId: { type: ["string", "null"] },
+          x: { type: ["number", "null"] },
+          z: { type: ["number", "null"] },
+          facingDegrees: { type: ["number", "null"] },
           kind: { type: ["string", "null"] },
           level: { type: ["number", "null"] },
           text: { type: ["string", "null"] },
@@ -182,12 +195,13 @@ function compact(op: Op): Record<string, unknown> {
 }
 
 /** Nothing reaches Roblox without passing this. */
+type Region = { center: number[]; size: number[]; rotationY: number; floorY: number };
+
 export function validatePlan(
   plan: Plan,
-  registry: { components: { componentId: string }[]; slots: { slotId: string }[]; kinds: string[] },
+  registry: { components: { componentId: string }[]; region: Region | null; kinds: string[] },
 ): Validation {
   const componentIds = new Set(registry.components.map((c) => c.componentId));
-  const slotIds = new Set(registry.slots.map((s) => s.slotId));
   const kinds = new Set(registry.kinds ?? []);
 
   const accepted: Record<string, unknown>[] = [];
@@ -215,9 +229,29 @@ export function validatePlan(
       continue;
     }
 
-    if (op.op === "move_to_slot" && (!op.slotId || !slotIds.has(op.slotId))) {
-      reject(`slotId "${op.slotId}" is not in the live registry`);
-      continue;
+    if (op.op === "move_to_position") {
+      if (typeof op.x !== "number" || typeof op.z !== "number" || !Number.isFinite(op.x) || !Number.isFinite(op.z)) {
+        reject("x and z must be finite numbers");
+        continue;
+      }
+      const facing = op.facingDegrees ?? 0;
+      if (!Number.isFinite(facing) || facing < 0 || facing > 360) {
+        reject(`facingDegrees ${facing} is outside 0-360`);
+        continue;
+      }
+      if (registry.region) {
+        const [cx, cz] = registry.region.center;
+        const [sx, sz] = registry.region.size;
+        const rad = (-registry.region.rotationY * Math.PI) / 180;
+        const dx = op.x - cx;
+        const dz = op.z - cz;
+        const localX = dx * Math.cos(rad) - dz * Math.sin(rad);
+        const localZ = dx * Math.sin(rad) + dz * Math.cos(rad);
+        if (Math.abs(localX) > sx / 2 || Math.abs(localZ) > sz / 2) {
+          reject(`(${op.x}, ${op.z}) is outside the storefront region`);
+          continue;
+        }
+      }
     }
     if (op.op === "set_kind" && (!op.kind || !kinds.has(op.kind))) {
       reject(`kind "${op.kind}" is not in the component library`);
@@ -243,7 +277,7 @@ export function validatePlan(
 
     // "Move it somewhere better" and "hide it" in one plan is not an experiment.
     const intent =
-      op.op === "move_to_slot"
+      op.op === "move_to_position"
         ? "placement"
         : op.op === "set_prominence"
           ? "prominence"

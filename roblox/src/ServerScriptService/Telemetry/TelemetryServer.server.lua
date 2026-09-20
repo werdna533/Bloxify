@@ -13,6 +13,7 @@ local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Telemetry = require(script.Parent.Telemetry)
+local Config = require(game:GetService("ServerScriptService").Storefront.Config)
 
 local APPROACH_RADIUS = 12
 local PATH_SAMPLE_STUDS = 2
@@ -58,6 +59,17 @@ end
 
 local function componentOf(model: Model): string
 	return model:GetAttribute("componentId") or model.Name
+end
+
+-- Shared by the telemetry path and the claim path: both need to turn a
+-- client-supplied componentId into the productId Shopify actually knows.
+local function productIdFor(componentId: string): string?
+	for _, model in ipairs(CollectionService:GetTagged("StorefrontComponent")) do
+		if componentOf(model) == componentId then
+			return model:GetAttribute("productId")
+		end
+	end
+	return nil
 end
 
 local function push(session: Session, event: { [string]: any })
@@ -162,6 +174,58 @@ CollectionService:GetInstanceAddedSignal("StorefrontComponent"):Connect(function
 	if instance:IsA("Model") then wirePrompt(instance) end
 end)
 
+-- ------------------------------------------------------------ purchase claim
+
+-- Roblox never talks to Shopify directly: it asks our own backend, which
+-- holds the Shopify Admin token, to mint a single-use discount code for this
+-- session and product. Runs off the event thread since RequestAsync blocks.
+local function requestClaim(player: Player, session: Session, componentId: string, productId: string)
+	task.spawn(function()
+		local ok, response = pcall(function()
+			return HttpService:RequestAsync({
+				Url = Config.BASE_URL .. "/api/claim",
+				Method = "POST",
+				Headers = {
+					["Content-Type"] = "application/json",
+					["Authorization"] = "Bearer " .. Config.AUTH_TOKEN,
+				},
+				Body = HttpService:JSONEncode({ sessionId = session.id, productId = productId }),
+			})
+		end)
+
+		if not player.Parent then return end -- they left before the backend answered
+
+		if not ok then
+			warn("[claim] request failed:", response)
+			remote:FireClient(player, { type = "claim_result", componentId = componentId, ok = false, error = "backend unreachable" })
+			return
+		end
+
+		local decoded = nil
+		pcall(function() decoded = HttpService:JSONDecode(response.Body) end)
+
+		if response.Success and decoded and decoded.code then
+			remote:FireClient(player, {
+				type = "claim_result",
+				componentId = componentId,
+				ok = true,
+				code = decoded.code,
+				url = decoded.url,
+			})
+		else
+			local message = (decoded and decoded.error) or ("backend replied " .. tostring(response.StatusCode))
+			warn("[claim] backend refused:", message)
+			remote:FireClient(player, {
+				type = "claim_result",
+				componentId = componentId,
+				ok = false,
+				error = message,
+				url = decoded and decoded.url or nil,
+			})
+		end
+	end)
+end
+
 -- ------------------------------------------------------- client-sent signals
 
 local CLIENT_TYPES = {
@@ -185,6 +249,19 @@ remote.OnServerEvent:Connect(function(player: Player, payload: any)
 	local session = sessions[player]
 	if not session then return end
 	if typeof(payload) ~= "table" then return end
+
+	if payload.type == "request_claim" then
+		session.lastActivity = os.clock()
+		local componentId = typeof(payload.componentId) == "string" and payload.componentId or nil
+		local productId = componentId and productIdFor(componentId) or nil
+		if not componentId or not productId then
+			remote:FireClient(player, { type = "claim_result", componentId = componentId, ok = false, error = "unknown product" })
+			return
+		end
+		requestClaim(player, session, componentId, productId)
+		return
+	end
+
 	if not CLIENT_TYPES[payload.type] then return end
 
 	session.lastActivity = os.clock()
@@ -220,17 +297,9 @@ remote.OnServerEvent:Connect(function(player: Player, payload: any)
 	end
 
 	local componentId = typeof(payload.componentId) == "string" and payload.componentId or nil
-	local productId = nil
-	if componentId then
-		for _, model in ipairs(CollectionService:GetTagged("StorefrontComponent")) do
-			if componentOf(model) == componentId then
-				productId = model:GetAttribute("productId")
-				break
-			end
-		end
-		-- Unknown component id means a stale or spoofed client; drop it.
-		if not productId then return end
-	end
+	local productId = componentId and productIdFor(componentId) or nil
+	-- Unknown component id means a stale or spoofed client; drop it.
+	if componentId and not productId then return end
 
 	-- Remember that they looked, so a dwell that ends without an interaction can
 	-- be told apart from one where they never even glanced at it.
@@ -329,7 +398,6 @@ RunService.Heartbeat:Connect(function(delta: number)
 								meta = {
 									approachBearing = bearing,
 									entrySpeed = speed,
-									fromSlot = model:GetAttribute("slotId"),
 								},
 							})
 						else

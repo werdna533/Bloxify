@@ -5,7 +5,7 @@ export const MAX_CTA = 40;
 export const MAX_SIGNAGE = 60;
 
 export const OP_NAMES = [
-  "move_to_slot",
+  "move_to_position",
   "set_kind",
   "set_prominence",
   "enable_interaction",
@@ -24,7 +24,9 @@ export const opSchema = z
   .object({
     op: z.enum(OP_NAMES),
     componentId: z.string().nullable(),
-    slotId: z.string().nullable(),
+    x: z.number().nullable(),
+    z: z.number().nullable(),
+    facingDegrees: z.number().nullable(),
     kind: z.string().nullable(),
     level: z.number().nullable(),
     text: z.string().nullable(),
@@ -36,8 +38,8 @@ export const opSchema = z
     if (needsComponent && !op.componentId) {
       ctx.addIssue({ code: "custom", message: `${op.op} requires componentId` });
     }
-    if (op.op === "move_to_slot" && !op.slotId) {
-      ctx.addIssue({ code: "custom", message: "move_to_slot requires slotId" });
+    if (op.op === "move_to_position" && (op.x === null || op.z === null)) {
+      ctx.addIssue({ code: "custom", message: "move_to_position requires x and z" });
     }
     if (op.op === "set_kind" && !op.kind) {
       ctx.addIssue({ code: "custom", message: "set_kind requires kind" });
@@ -102,7 +104,9 @@ export const PLAN_JSON_SCHEMA = {
         required: [
           "op",
           "componentId",
-          "slotId",
+          "x",
+          "z",
+          "facingDegrees",
           "kind",
           "level",
           "text",
@@ -112,7 +116,12 @@ export const PLAN_JSON_SCHEMA = {
         properties: {
           op: { type: "string", enum: [...OP_NAMES] },
           componentId: { type: ["string", "null"] },
-          slotId: { type: ["string", "null"] },
+          x: { type: ["number", "null"], description: "Target x coordinate for move_to_position." },
+          z: { type: ["number", "null"], description: "Target z coordinate for move_to_position." },
+          facingDegrees: {
+            type: ["number", "null"],
+            description: "Facing angle in degrees for move_to_position, 0-360. Point it back toward the main path.",
+          },
           kind: { type: ["string", "null"] },
           level: { type: ["number", "null"] },
           text: { type: ["string", "null"] },

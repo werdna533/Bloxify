@@ -1,9 +1,8 @@
-export type Slot = {
-  slotId: string;
-  trafficRank: number;
-  visibilityScore?: number | null;
-  pos: number[];
-  facing: number[];
+export type Region = {
+  center: number[];
+  size: number[];
+  rotationY: number;
+  floorY: number;
 };
 
 export type ComponentRow = {
@@ -11,8 +10,9 @@ export type ComponentRow = {
   productId: string | null;
   title: string;
   price: number | null;
-  slotId: string | null;
-  trafficRank: number | null;
+  pos: number[] | null;
+  facing: number[] | null;
+  visibilityScore: number | null;
   kind: string | null;
   prominence: number | null;
   impressions: number;
@@ -40,7 +40,8 @@ export type Analytics = {
   source: string;
   experiments: string[];
   sourceBreakdown: { source: string; events: number; sessions: number }[];
-  slots: Slot[];
+  region: Region | null;
+  hasStorefront: boolean;
   place?: { name: string; placeId: number; gameId: number };
   registryUpdatedAt: number | null;
   components: ComponentRow[];

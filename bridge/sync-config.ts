@@ -70,11 +70,15 @@ return {
 }
 `;
 
+// Optional: npx tsx sync-config.ts "Place1" targets a specific open Studio by
+// name when more than one is connected.
+const studioFilter = process.argv[2];
+
 const bridge = new StudioBridge();
 await bridge.connect();
 const tools = await bridge.listToolNames();
 console.log(`[sync-config] connected, ${tools.length} tools available`);
-const result = await bridge.executeLuau(luau, "Edit");
+const result = await bridge.executeLuau(luau, "Edit", studioFilter);
 console.log(`[sync-config] ${result.isError ? "ERROR" : "ok"}: ${result.text}`);
 await bridge.close();
 process.exit(result.isError ? 1 : 0);

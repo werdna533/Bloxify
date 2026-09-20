@@ -33,16 +33,16 @@ const AISLE_X = -77;
 
 type Registry = {
   experimentId: string;
-  slots: { slotId: string; trafficRank: number; pos: number[]; facing: number[] }[];
+  region: { center: number[]; size: number[]; rotationY: number; floorY: number } | null;
   components: {
     componentId: string;
     productId: string;
     title: string;
     price: number;
-    slotId: string;
     kind: string;
     prominence: number;
     interactionEnabled: boolean;
+    visibilityScore?: number | null;
     pos: number[];
   }[];
 };
@@ -85,7 +85,6 @@ async function main() {
     process.exit(1);
   }
   const registry = (await res.json()) as Registry;
-  const rankBySlot = new Map(registry.slots.map((s) => [s.slotId, s.trafficRank]));
 
   console.log(
     `[sim] ${sessionCount} sessions against ${registry.components.length} components, experiment ${registry.experimentId}`,
@@ -98,7 +97,7 @@ async function main() {
   for (let i = 0; i < sessionCount; i++) {
     const sessionId = uuid();
     const t0 = startWall + i * 9 + rand(0, 4);
-    const events = buildSession(registry, rankBySlot, t0);
+    const events = buildSession(registry, t0);
     eventCount += events.length;
 
     // Batch the way the game does, so the ingest path sees realistic shapes.
@@ -127,13 +126,13 @@ async function main() {
   console.log(`[sim] done: ${posted} sessions, ${eventCount} events, all tagged source="sim"`);
 }
 
-function buildSession(registry: Registry, rankBySlot: Map<string, number>, t0: number): SimEvent[] {
+function buildSession(registry: Registry, t0: number): SimEvent[] {
   const events: SimEvent[] = [];
   let t = t0;
   let pos: number[] = [...SPAWN];
   const walkSpeed = rand(11, 17);
 
-  // Players who lose interest turn back early, which is what makes a far slot
+  // Players who lose interest turn back early, which is what makes a far spot
   // genuinely worse rather than uniformly worse.
   const patience = rand(0.35, 1.0);
   const walkDepth = 30 + patience * 90;
@@ -169,7 +168,7 @@ function buildSession(registry: Registry, rankBySlot: Map<string, number>, t0: n
     .sort((a, b) => a.pos[2] - b.pos[2]);
 
   for (const component of inRange) {
-    const rank = rankBySlot.get(component.slotId) ?? 8;
+    const visibility = component.visibilityScore ?? 0.5;
     const appeal = APPEAL[component.componentId] ?? DEFAULT_APPEAL;
     const prominenceBonus = (component.prominence - 1) * 0.08;
 
@@ -181,7 +180,7 @@ function buildSession(registry: Registry, rankBySlot: Map<string, number>, t0: n
     walkTo(aislePoint, component.pos);
 
     // Did they ever see it? The distinction a web pixel cannot make.
-    if (!chance(clamp(1.02 - 0.085 * rank, 0.25, 0.97))) continue;
+    if (!chance(clamp(0.25 + 0.72 * visibility, 0.25, 0.97))) continue;
 
     events.push({
       t,
@@ -199,7 +198,7 @@ function buildSession(registry: Registry, rankBySlot: Map<string, number>, t0: n
     });
 
     const pApproach = clamp(
-      0.24 + 0.46 * appeal + 0.22 * (1 - rank / 8) + prominenceBonus,
+      0.24 + 0.46 * appeal + 0.22 * visibility + prominenceBonus,
       0.04,
       0.92,
     );
@@ -221,7 +220,6 @@ function buildSession(registry: Registry, rankBySlot: Map<string, number>, t0: n
       pos: [...pos],
       look: unit(pos, component.pos),
       meta: {
-        fromSlot: "aisle",
         approachBearing: Number(bearing.toFixed(1)),
         entrySpeed: Number(rand(8, 17).toFixed(1)),
       },

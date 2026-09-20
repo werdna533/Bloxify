@@ -40,20 +40,38 @@ export class StudioBridge {
     return { text, isError: res.isError === true, images };
   }
 
-  /** Studio MCP requires a studio_id on every call. Resolve and cache it. */
-  async getStudioId(): Promise<string> {
+  /**
+   * Studio MCP requires a studio_id on every call. Resolve and cache it.
+   * With more than one Studio open (e.g. testing against a second, blank
+   * place alongside the main demo place), pass a substring of the target's
+   * name -- shown in Studio's title bar -- to pick it instead of the first
+   * one MCP happens to list.
+   */
+  async getStudioId(nameFilter?: string): Promise<string> {
     if (this.studioId) return this.studioId;
     const res = await this.call("list_roblox_studios", {});
     const parsed = JSON.parse(res.text) as { studios: { id: string; name: string }[] };
     if (!parsed.studios?.length) throw new Error("no Roblox Studio instances connected");
-    this.studioId = parsed.studios[0].id;
-    console.log(`[bridge] studio: ${parsed.studios[0].name} (${this.studioId})`);
+    const chosen = nameFilter
+      ? parsed.studios.find((s) => s.name.toLowerCase().includes(nameFilter.toLowerCase()))
+      : parsed.studios[0];
+    if (!chosen) {
+      throw new Error(
+        `no connected Studio matches "${nameFilter}". Connected: ${parsed.studios.map((s) => s.name).join(", ")}`,
+      );
+    }
+    this.studioId = chosen.id;
+    console.log(`[bridge] studio: ${chosen.name} (${this.studioId})`);
     return this.studioId;
   }
 
-  async executeLuau(code: string, datamodel: "Edit" | "Client" | "Server" = "Edit"): Promise<ToolResult> {
+  async executeLuau(
+    code: string,
+    datamodel: "Edit" | "Client" | "Server" = "Edit",
+    studioNameFilter?: string,
+  ): Promise<ToolResult> {
     return this.call("execute_luau", {
-      studio_id: await this.getStudioId(),
+      studio_id: await this.getStudioId(studioNameFilter),
       datamodel_type: datamodel,
       code,
     });

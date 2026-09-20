@@ -123,26 +123,53 @@ local function buildRoot(model: Model, size: Vector3): BasePart
 	return root
 end
 
-local function buildMannequin(garmentColour: Color3, garmentOnLegs: boolean): (Model, BasePart)
+-- Clones the real R6 figure the user set up (ReplicatedStorage.StorefrontTemplates.MannequinR15)
+-- and dresses it with the composited garment textures, instead of drawing a
+-- placeholder box body.
+local function buildMannequin(shirtTemplateId: string?, pantsTemplateId: string?): (Model, BasePart)
 	local model = Instance.new("Model")
 	local root = buildRoot(model, Vector3.new(4.2, 0.6, 4.2))
 
-	part("Legs", Vector3.new(1.7, 3.0, 1.1), Vector3.new(0, 2.1, 0), SHELL).Parent = model
-	part("Torso", Vector3.new(2.2, 2.6, 1.2), Vector3.new(0, 4.9, 0), SHELL).Parent = model
-	part("Head", Vector3.new(1.4, 1.4, 1.4), Vector3.new(0, 6.9, 0), SHELL, "Ball").Parent = model
-	part("ArmLeft", Vector3.new(0.6, 2.4, 0.6), Vector3.new(-1.35, 4.7, 0), SHELL).Parent = model
-	part("ArmRight", Vector3.new(0.6, 2.4, 0.6), Vector3.new(1.35, 4.7, 0), SHELL).Parent = model
-
-	if garmentOnLegs then
-		part("Garment", Vector3.new(2.0, 3.2, 1.4), Vector3.new(0, 2.1, 0), garmentColour).Parent = model
-	else
-		part("Garment", Vector3.new(2.5, 2.8, 1.5), Vector3.new(0, 4.9, 0), garmentColour).Parent = model
-		part("GarmentSleeveL", Vector3.new(0.8, 1.6, 0.8), Vector3.new(-1.35, 5.1, 0), garmentColour).Parent = model
-		part("GarmentSleeveR", Vector3.new(0.8, 1.6, 0.8), Vector3.new(1.35, 5.1, 0), garmentColour).Parent = model
+	local templates = game:GetService("ReplicatedStorage"):FindFirstChild("StorefrontTemplates")
+	local source = templates and templates:FindFirstChild("MannequinR15")
+	if not source then
+		error("ComponentLibrary: ReplicatedStorage.StorefrontTemplates.MannequinR15 is missing")
 	end
 
-	addSign(model, 9.0)
-	addBillboard(model, root, 10.6)
+	local figure = source:Clone()
+	figure.Name = "Figure"
+	for _, inst in ipairs(figure:GetDescendants()) do
+		if inst:IsA("BasePart") then
+			inst.Anchored = true
+			inst.CanCollide = false
+		elseif inst:IsA("Humanoid") then
+			inst.PlatformStand = true
+		end
+	end
+
+	local shirt = figure:FindFirstChildOfClass("Shirt")
+	if shirt and shirtTemplateId then
+		shirt.ShirtTemplate = shirtTemplateId
+	end
+	local pants = figure:FindFirstChildOfClass("Pants")
+	if pants and pantsTemplateId then
+		pants.PantsTemplate = pantsTemplateId
+	end
+
+	figure.Parent = model
+
+	-- Stand the clone on the pedestal: measure its own bounding box, then
+	-- shift it so its feet meet the pedestal's top face. Measured rather than
+	-- a hardcoded offset, since the source rig's height isn't ours to assume.
+	figure:PivotTo(CFrame.new())
+	local box, boxSize = figure:GetBoundingBox()
+	local feetBelowPivot = box.Position.Y - boxSize.Y / 2
+	local pedestalTopY = root.Position.Y + root.Size.Y / 2
+	figure:PivotTo(CFrame.new(root.Position.X, pedestalTopY - feetBelowPivot, root.Position.Z))
+	local figureTopY = pedestalTopY + boxSize.Y
+
+	addSign(model, figureTopY + 1.4)
+	addBillboard(model, root, figureTopY + 3.0)
 	return model, root
 end
 
@@ -174,7 +201,7 @@ function ComponentLibrary.build(spec: { [string]: any }): Model
 	if spec.kind == "PlushStand" then
 		model, root = buildPlushStand(spec.garmentColour or Color3.fromRGB(245, 245, 245))
 	else
-		model, root = buildMannequin(spec.garmentColour or SHELL, spec.garmentOnLegs == true)
+		model, root = buildMannequin(spec.shirtTemplateId, spec.pantsTemplateId)
 	end
 
 	model.Name = spec.componentId
@@ -190,7 +217,7 @@ function ComponentLibrary.build(spec: { [string]: any }): Model
 
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "InspectPrompt"
-	prompt.ActionText = spec.ctaText or "View"
+	prompt.ActionText = spec.ctaText or "Buy now"
 	prompt.ObjectText = spec.title or spec.componentId
 	prompt.HoldDuration = 0.4
 	prompt.MaxActivationDistance = 12
@@ -204,7 +231,7 @@ function ComponentLibrary.build(spec: { [string]: any }): Model
 	model:SetAttribute("kind", spec.kind)
 	model:SetAttribute("prominence", 1)
 	model:SetAttribute("interactionEnabled", true)
-	model:SetAttribute("ctaText", spec.ctaText or "View")
+	model:SetAttribute("ctaText", spec.ctaText or "Buy now")
 	model:SetAttribute("signageText", spec.signageText or spec.title or "")
 	model:SetAttribute("garmentColour", spec.garmentColour or SHELL)
 	model:SetAttribute("imageAssetId", spec.imageAssetId)
@@ -310,10 +337,29 @@ function ComponentLibrary.refreshText(model: Model)
 	if root then
 		local prompt = root:FindFirstChild("InspectPrompt")
 		if prompt and prompt:IsA("ProximityPrompt") then
-			prompt.ActionText = model:GetAttribute("ctaText") or "View"
+			prompt.ActionText = model:GetAttribute("ctaText") or "Buy now"
 			prompt.ObjectText = model:GetAttribute("title") or model.Name
 			prompt.Enabled = model:GetAttribute("interactionEnabled") ~= false
 		end
+	end
+end
+
+-- Re-applies the garment templates baked onto the Figure's Shirt/Pants at
+-- build time from the model's current attributes. Needed after anything that
+-- changes shirtTemplateId/pantsTemplateId post-build (swap_products) --
+-- unlike text labels, these are Instance properties set once in
+-- buildMannequin and never re-read from attributes on their own.
+function ComponentLibrary.refreshGarment(model: Model)
+	local figure = model:FindFirstChild("Figure")
+	if not figure then return end
+
+	local shirt = figure:FindFirstChildOfClass("Shirt")
+	if shirt then
+		shirt.ShirtTemplate = model:GetAttribute("shirtTemplateId") or ""
+	end
+	local pants = figure:FindFirstChildOfClass("Pants")
+	if pants then
+		pants.PantsTemplate = model:GetAttribute("pantsTemplateId") or ""
 	end
 end
 

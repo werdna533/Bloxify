@@ -3,58 +3,10 @@
 -- a different thing from standing near a display, so it is reported
 -- separately and never added to dwell time.
 
-local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- Placeholder until the AI-composited texture pipeline exists: a real Roblox
--- catalog shirt/pants, so Try On has something to actually show today.
-local FALLBACK_SHIRT = "http://www.roblox.com/asset/?id=4846089534"
-local FALLBACK_PANTS = "http://www.roblox.com/asset/?id=382537568"
-
--- Remembers what the player was wearing so Take Off can restore it exactly,
--- including "wasn't wearing a Shirt/Pants at all".
-local wornBefore: { shirt: string?, pants: string?, hadShirt: boolean, hadPants: boolean }? = nil
-
-local function tryOn(model: Model)
-	local character = Players.LocalPlayer.Character
-	if not character then return end
-
-	local shirt = character:FindFirstChildOfClass("Shirt")
-	local pants = character:FindFirstChildOfClass("Pants")
-	wornBefore = {
-		shirt = shirt and shirt.ShirtTemplate or nil,
-		pants = pants and pants.PantsTemplate or nil,
-		hadShirt = shirt ~= nil,
-		hadPants = pants ~= nil,
-	}
-
-	if not shirt then
-		shirt = Instance.new("Shirt")
-		shirt.Parent = character
-	end
-	if not pants then
-		pants = Instance.new("Pants")
-		pants.Parent = character
-	end
-	shirt.ShirtTemplate = model:GetAttribute("shirtTemplateId") or FALLBACK_SHIRT
-	pants.PantsTemplate = model:GetAttribute("pantsTemplateId") or FALLBACK_PANTS
-end
-
-local function takeOff()
-	if not wornBefore then return end
-	local character = Players.LocalPlayer.Character
-	if character then
-		local shirt = character:FindFirstChildOfClass("Shirt")
-		local pants = character:FindFirstChildOfClass("Pants")
-		if shirt then
-			if wornBefore.hadShirt then shirt.ShirtTemplate = wornBefore.shirt or "" else shirt:Destroy() end
-		end
-		if pants then
-			if wornBefore.hadPants then pants.PantsTemplate = wornBefore.pants or "" else pants:Destroy() end
-		end
-	end
-	wornBefore = nil
-end
+local remote = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("TelemetryRemote") :: RemoteEvent
 
 local ProductPanel = {}
 
@@ -84,46 +36,6 @@ local function report(event: { [string]: any })
 	if emit then emit(event) end
 end
 
-local function clothingComponents(): { Model }
-	local out = {}
-	for _, model in ipairs(CollectionService:GetTagged("StorefrontComponent")) do
-		if model:IsA("Model") and model:GetAttribute("kind") == "Mannequin" then
-			table.insert(out, model)
-		end
-	end
-	table.sort(out, function(a, b)
-		return tostring(a:GetAttribute("componentId")) < tostring(b:GetAttribute("componentId"))
-	end)
-	return out
-end
-
-local function findComponent(componentId: string): Model?
-	for _, model in ipairs(CollectionService:GetTagged("StorefrontComponent")) do
-		if model:GetAttribute("componentId") == componentId then return model :: Model end
-	end
-	return nil
-end
-
-local function touch(action: string, toComponentId: string?)
-	if not state then return end
-	local nowClock = os.clock()
-	if nowClock - state.lastAction <= ACTIVE_WINDOW then
-		state.activeSeconds += nowClock - state.lastAction
-	end
-	state.lastAction = nowClock
-
-	local meta: { [string]: any } = { action = action }
-	if toComponentId then
-		-- Which item they browsed to. Attention this item earned while the
-		-- player was standing at a different display is demand that placement
-		-- did not create, and nothing else in the funnel can show it.
-		meta.toComponentId = toComponentId
-		meta.fromComponentId = state.anchorComponentId
-	end
-
-	report({ type = "panel_engaged", surface = "gui", componentId = state.componentId, meta = meta })
-end
-
 function ProductPanel.close(reason: string)
 	if not state or not gui then return end
 	local nowClock = os.clock()
@@ -142,41 +54,23 @@ function ProductPanel.close(reason: string)
 		},
 	})
 
-	takeOff()
 	gui:Destroy()
 	gui = nil
 	state = nil
 end
 
--- keepSession rebuilds the contents for a different product without ending the
--- panel session: browsing the range is one visit with tab events inside it,
--- not several panel opens.
-local function build(model: Model, openMethod: string, keepSession: boolean?)
+local function build(model: Model, openMethod: string)
 	local componentId = model:GetAttribute("componentId")
 
-	if keepSession and state and gui then
-		local previous = state
-		gui:Destroy()
-		state = {
-			anchorComponentId = previous.anchorComponentId,
-			componentId = componentId,
-			openedAt = previous.openedAt,
-			lastAction = previous.lastAction,
-			activeSeconds = previous.activeSeconds,
-			-- Per product: browsing to a different item offers a fresh CTA.
-			clicked = false,
-		}
-	else
-		ProductPanel.close("replaced")
-		state = {
-			anchorComponentId = componentId,
-			componentId = componentId,
-			openedAt = os.clock(),
-			lastAction = os.clock(),
-			activeSeconds = 0,
-			clicked = false,
-		}
-	end
+	ProductPanel.close("replaced")
+	state = {
+		anchorComponentId = componentId,
+		componentId = componentId,
+		openedAt = os.clock(),
+		lastAction = os.clock(),
+		activeSeconds = 0,
+		clicked = false,
+	}
 
 	local screen = Instance.new("ScreenGui")
 	screen.Name = "ProductPanel"
@@ -186,10 +80,8 @@ local function build(model: Model, openMethod: string, keepSession: boolean?)
 
 	local frame = Instance.new("Frame")
 	frame.Name = "PanelFrame"
-	-- Tall enough for image + price + range row + Try On + CTA without the
-	-- bottom-anchored buttons overlapping the range row above them.
-	frame.Size = UDim2.fromOffset(460, 480)
-	frame.Position = UDim2.new(0.5, -230, 0.5, -240)
+	frame.Size = UDim2.fromOffset(460, 350)
+	frame.Position = UDim2.new(0.5, -230, 0.5, -175)
 	frame.BackgroundColor3 = Color3.fromRGB(18, 18, 21)
 	frame.BorderSizePixel = 0
 	frame.Parent = screen
@@ -288,141 +180,42 @@ local function build(model: Model, openMethod: string, keepSession: boolean?)
 		state.clicked = true
 		state.lastAction = os.clock()
 		report({ type = "panel_cta_clicked", surface = "gui", componentId = componentId })
-		cta.Text = "Check your phone for the code"
+		cta.Text = "Loading..."
 		cta.BackgroundColor3 = Color3.fromRGB(70, 110, 160)
+		-- Still mints a real claim code server-side (it's genuinely wired to
+		-- Shopify), but the demo shows this as the moment the Roblox checkout
+		-- experience would open, not a raw code, so the button stays on
+		-- "Loading..." rather than surfacing the code itself.
+		remote:FireServer({ type = "request_claim", componentId = componentId })
 	end)
 
-	if model:GetAttribute("kind") == "Mannequin" then
-		local tryOnButton = Instance.new("TextButton")
-		tryOnButton.Name = "TryOnButton"
-		tryOnButton.Size = UDim2.new(1, -36, 0, 34)
-		tryOnButton.Position = UDim2.new(0, 18, 1, -102)
-		tryOnButton.BackgroundColor3 = Color3.fromRGB(60, 62, 70)
-		tryOnButton.Font = Enum.Font.GothamBold
-		tryOnButton.TextSize = 14
-		tryOnButton.TextColor3 = Color3.fromRGB(240, 240, 240)
-		tryOnButton.Text = "Try On"
-		tryOnButton.Parent = frame
-		local tryOnCorner = Instance.new("UICorner")
-		tryOnCorner.CornerRadius = UDim.new(0, 8)
-		tryOnCorner.Parent = tryOnButton
-
-		local trying = false
-		tryOnButton.Activated:Connect(function()
-			touch("try_on")
-			trying = not trying
-			if trying then
-				tryOn(model)
-				tryOnButton.Text = "Take Off"
-			else
-				takeOff()
-				tryOnButton.Text = "Try On"
-			end
-		end)
-	end
-
-	-- Clothing panels also list the rest of the clothing range; the plush goose
-	-- gets a single-product panel.
-	if model:GetAttribute("kind") == "Mannequin" then
-		local label = Instance.new("TextLabel")
-		label.Size = UDim2.new(1, -36, 0, 16)
-		label.Position = UDim2.fromOffset(18, 264)
-		label.BackgroundTransparency = 1
-		label.Font = Enum.Font.Gotham
-		label.TextSize = 11
-		label.TextXAlignment = Enum.TextXAlignment.Left
-		label.TextColor3 = Color3.fromRGB(130, 130, 140)
-		label.Text = "MORE FROM THIS RANGE"
-		label.Parent = frame
-
-		local row = Instance.new("Frame")
-		row.Name = "RangeRow"
-		row.Size = UDim2.new(1, -36, 0, 74)
-		row.Position = UDim2.fromOffset(18, 284)
-		row.BackgroundTransparency = 1
-		row.Parent = frame
-
-		local layout = Instance.new("UIListLayout")
-		layout.FillDirection = Enum.FillDirection.Horizontal
-		layout.Padding = UDim.new(0, 8)
-		layout.Parent = row
-
-		for _, other in ipairs(clothingComponents()) do
-			local otherId = other:GetAttribute("componentId")
-			local otherAsset = other:GetAttribute("imageAssetId")
-
-			-- Product photo with rounded corners, matching the main image above,
-			-- rather than a flat colour block standing in for the item.
-			local swatch = Instance.new("ImageButton")
-			swatch.Name = "Swatch_" .. otherId
-			swatch.Size = UDim2.fromOffset(98, 74)
-			swatch.BackgroundColor3 = otherAsset and Color3.fromRGB(244, 244, 246)
-				or (other:GetAttribute("garmentColour") or Color3.fromRGB(70, 70, 80))
-			swatch.Image = otherAsset or ""
-			swatch.ScaleType = Enum.ScaleType.Fit
-			swatch.AutoButtonColor = otherId ~= componentId
-			swatch.Parent = row
-			local sc = Instance.new("UICorner")
-			sc.CornerRadius = UDim.new(0, 8)
-			sc.Parent = swatch
-
-			-- Name caption on a translucent strip along the bottom, so the photo
-			-- is not competing with text drawn over it.
-			local caption = Instance.new("Frame")
-			caption.Size = UDim2.new(1, 0, 0, 20)
-			caption.Position = UDim2.new(0, 0, 1, -20)
-			caption.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
-			caption.BackgroundTransparency = 0.25
-			caption.BorderSizePixel = 0
-			caption.Parent = swatch
-			local captionCorner = Instance.new("UICorner")
-			captionCorner.CornerRadius = UDim.new(0, 8)
-			captionCorner.Parent = caption
-			-- Square off the top of the strip so only the bottom stays rounded.
-			local captionFix = Instance.new("Frame")
-			captionFix.Size = UDim2.new(1, 0, 0, 8)
-			captionFix.BackgroundColor3 = caption.BackgroundColor3
-			captionFix.BackgroundTransparency = caption.BackgroundTransparency
-			captionFix.BorderSizePixel = 0
-			captionFix.Parent = caption
-
-			local captionLabel = Instance.new("TextLabel")
-			captionLabel.Size = UDim2.fromScale(1, 1)
-			captionLabel.BackgroundTransparency = 1
-			captionLabel.Font = Enum.Font.Gotham
-			captionLabel.TextSize = 10
-			captionLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-			captionLabel.Text = other:GetAttribute("signageText") or otherId
-			captionLabel.Parent = caption
-
-			if otherId == componentId then
-				local border = Instance.new("UIStroke")
-				border.Color = Color3.fromRGB(255, 255, 255)
-				border.Thickness = 2
-				border.Parent = swatch
-			else
-				swatch.Activated:Connect(function()
-					touch("tab", otherId)
-					local target = findComponent(otherId)
-					if target then build(target, "tab", true) end
-				end)
-			end
-		end
-	end
-
-	if not keepSession then
-		report({
-			type = "panel_opened",
-			surface = "gui",
-			componentId = componentId,
-			meta = { openMethod = openMethod },
-		})
-	end
+	report({
+		type = "panel_opened",
+		surface = "gui",
+		componentId = componentId,
+		meta = { openMethod = openMethod },
+	})
 end
 
 function ProductPanel.open(model: Model, openMethod: string)
 	build(model, openMethod)
 end
+
+-- The server minted (or failed to mint) a real Shopify discount code for the
+-- product currently on screen; reflect the outcome on the CTA button itself.
+remote.OnClientEvent:Connect(function(payload: any)
+	if typeof(payload) ~= "table" or payload.type ~= "claim_result" then return end
+	if not state or not gui or state.componentId ~= payload.componentId then return end
+	local frame = gui:FindFirstChild("PanelFrame")
+	local cta = frame and frame:FindFirstChild("CtaButton") :: TextButton?
+	if not cta then return end
+
+	if not payload.ok then
+		-- Only a real failure changes anything visible, and even then it just
+		-- quietly allows a retry -- the button keeps saying "Loading...".
+		state.clicked = false
+	end
+end)
 
 function ProductPanel.isOpenFor(componentId: string): boolean
 	return state ~= nil and state.componentId == componentId

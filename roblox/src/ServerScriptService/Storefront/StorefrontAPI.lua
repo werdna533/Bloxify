@@ -4,6 +4,7 @@
 
 local CollectionService = game:GetService("CollectionService")
 local HttpService = game:GetService("HttpService")
+local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 
 -- Undo recording is a Studio-only facility. This module is only ever driven
@@ -30,6 +31,16 @@ local ComponentLibrary = require(script.Parent.ComponentLibrary)
 
 local StorefrontAPI = {}
 
+local function publishedPlaceName(): string
+	local ok, info = pcall(function()
+		return MarketplaceService:GetProductInfo(game.PlaceId)
+	end)
+	if ok and info and type(info.Name) == "string" and info.Name ~= "" then
+		return info.Name
+	end
+	return "Freeze Tag!"
+end
+
 local MAX_OPS = 5
 local MAX_CTA = 40
 local MAX_SIGNAGE = 60
@@ -52,20 +63,93 @@ local function findComponent(componentId: string): Model?
 	return nil
 end
 
-local function findSlot(slotId: string): BasePart?
-	for _, s in ipairs(CollectionService:GetTagged("StorefrontSlot")) do
-		if s:GetAttribute("slotId") == slotId and s:IsA("BasePart") then
-			return s
-		end
-	end
-	return nil
+-- ------------------------------------------------------------------- region
+
+-- Replaces the old 8 hand-placed Slot_A..H parts with a single tagged Part
+-- marking the walkable rectangle. A new place only needs to place and size
+-- one Part and tag it StorefrontRegion, instead of hand-authoring 8 slots.
+local REGION_TAG = "StorefrontRegion"
+local MIN_COMPONENT_SPACING = 6 -- studs between two component centres
+local PLACEMENT_CHECK_SIZE = Vector3.new(3.5, 7, 3.5) -- core-body box: floor to head height
+local FLOOR_CLEARANCE = 0.1 -- lifts the check box off the floor so a region sitting flush on a solid floor part doesn't read as "blocked by the floor itself"
+
+local function findRegion(): BasePart?
+	local region = CollectionService:GetTagged(REGION_TAG)[1]
+	return region and region:IsA("BasePart") and region or nil
 end
 
-local function placeAtSlot(model: Model, slot: BasePart)
-	local facing = slot:GetAttribute("facing") or Vector3.new(0, 0, 1)
-	local base = slot.Position + Vector3.new(0, -0.1, 0)
+-- Point-in-oriented-rectangle test in the XZ plane, using the region part's
+-- own CFrame so a rotated region works the same as an axis-aligned one.
+local function insideRegion(region: BasePart, x: number, z: number): boolean
+	local relative = region.CFrame:PointToObjectSpace(Vector3.new(x, region.Position.Y, z))
+	return math.abs(relative.X) <= region.Size.X / 2 and math.abs(relative.Z) <= region.Size.Z / 2
+end
+
+-- A raycast-fan "openness" heuristic (as used by frameStore) is not enough
+-- here: a spot right next to a doorframe or wall trim still reads as "open"
+-- on average, because most of a 360-degree fan around it IS open room, even
+-- while the exact point clips the doorframe. Direct overlap at the actual
+-- footprint is what catches that -- this is the same box check used to
+-- verify mannequin placement earlier, now run before anything is built.
+local function placementBlocked(x: number, z: number, floorY: number, ignore: { Instance }): (boolean, string?)
+	local params = OverlapParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = ignore
+
+	local checkCFrame = CFrame.new(x, floorY + FLOOR_CLEARANCE + PLACEMENT_CHECK_SIZE.Y / 2, z)
+	local parts = workspace:GetPartBoundsInBox(checkCFrame, PLACEMENT_CHECK_SIZE, params)
+	if #parts > 0 then
+		return true, parts[1]:GetFullName()
+	end
+	return false
+end
+
+local function validatePlacement(x: number, z: number, ignoreModel: Model?): (boolean, string?)
+	if type(x) ~= "number" or type(z) ~= "number" or x ~= x or z ~= z then
+		return false, "x/z must be numbers"
+	end
+
+	local region = findRegion()
+	if not region then return false, "no StorefrontRegion part is tagged in this place" end
+	if not insideRegion(region, x, z) then
+		return false, "position is outside the storefront region"
+	end
+
+	for _, other in ipairs(CollectionService:GetTagged("StorefrontComponent")) do
+		if other ~= ignoreModel and other:IsA("Model") then
+			local otherPos = other:GetPivot().Position
+			local dist = (Vector3.new(x, otherPos.Y, z) - otherPos).Magnitude
+			if dist < MIN_COMPONENT_SPACING then
+				return false, string.format(
+					"too close to %s (%.1f studs, needs %.1f)",
+					tostring(other:GetAttribute("componentId")), dist, MIN_COMPONENT_SPACING)
+			end
+		end
+	end
+
+	local ignore = { region }
+	for _, m in ipairs(CollectionService:GetTagged("StorefrontComponent")) do
+		table.insert(ignore, m)
+	end
+	local forcefields = workspace:FindFirstChild("Forcefields")
+	if forcefields then table.insert(ignore, forcefields) end
+
+	local floorY = region.Position.Y + region.Size.Y / 2
+	local blocked, blockedBy = placementBlocked(x, z, floorY, ignore)
+	if blocked then
+		return false, "position intersects existing geometry (" .. tostring(blockedBy) .. ")"
+	end
+
+	return true
+end
+
+local function placeAtPosition(model: Model, x: number, z: number, facingDegrees: number)
+	local region = findRegion()
+	local floorY = region and (region.Position.Y + region.Size.Y / 2) or model:GetPivot().Position.Y
+	local rad = math.rad(facingDegrees)
+	local facing = Vector3.new(math.cos(rad), 0, math.sin(rad))
+	local base = Vector3.new(x, floorY, z)
 	model:PivotTo(CFrame.lookAt(base, base + facing))
-	model:SetAttribute("slotId", slot:GetAttribute("slotId"))
 end
 
 local function textIsSafe(text: string): (boolean, string?)
@@ -82,25 +166,18 @@ end
 
 local ops = {}
 
-function ops.move_to_slot(op: { [string]: any }): (boolean, string?)
+function ops.move_to_position(op: { [string]: any }): (boolean, string?)
 	local model = findComponent(op.componentId)
 	if not model then return false, "unknown componentId " .. tostring(op.componentId) end
-	local slot = findSlot(op.slotId)
-	if not slot then return false, "unknown slotId " .. tostring(op.slotId) end
 
-	local currentSlotId = model:GetAttribute("slotId")
-	if currentSlotId == op.slotId then return true end
+	local x, z = tonumber(op.x), tonumber(op.z)
+	local facingDegrees = tonumber(op.facingDegrees) or 0
+	if not x or not z then return false, "x and z must be numbers" end
 
-	-- If something already stands there, swap the two rather than overlap.
-	for _, other in ipairs(CollectionService:GetTagged("StorefrontComponent")) do
-		if other ~= model and other:GetAttribute("slotId") == op.slotId and other:IsA("Model") then
-			local oldSlot = currentSlotId and findSlot(currentSlotId)
-			if oldSlot then placeAtSlot(other, oldSlot) end
-			break
-		end
-	end
+	local ok, why = validatePlacement(x, z, model)
+	if not ok then return false, why end
 
-	placeAtSlot(model, slot)
+	placeAtPosition(model, x, z, facingDegrees)
 	return true
 end
 
@@ -191,7 +268,7 @@ function ops.set_kind(op: { [string]: any }): (boolean, string?)
 	if not known then return false, "unknown kind " .. kind end
 	if model:GetAttribute("kind") == kind then return true end
 
-	local slotId = model:GetAttribute("slotId")
+	local pivot = model:GetPivot()
 	local rebuilt = ComponentLibrary.build({
 		componentId = model:GetAttribute("componentId"),
 		productId = model:GetAttribute("productId"),
@@ -202,6 +279,9 @@ function ops.set_kind(op: { [string]: any }): (boolean, string?)
 		garmentOnLegs = model:GetAttribute("garmentOnLegs"),
 		ctaText = model:GetAttribute("ctaText"),
 		signageText = model:GetAttribute("signageText"),
+		imageAssetId = model:GetAttribute("imageAssetId"),
+		shirtTemplateId = model:GetAttribute("shirtTemplateId"),
+		pantsTemplateId = model:GetAttribute("pantsTemplateId"),
 	})
 	local prominence = model:GetAttribute("prominence") or 1
 	local interaction = model:GetAttribute("interactionEnabled")
@@ -209,10 +289,8 @@ function ops.set_kind(op: { [string]: any }): (boolean, string?)
 	model:Destroy()
 
 	rebuilt.Parent = parent
-	rebuilt:SetAttribute("slotId", slotId)
+	rebuilt:PivotTo(pivot)
 	rebuilt:SetAttribute("interactionEnabled", interaction)
-	local slot = slotId and findSlot(slotId)
-	if slot then placeAtSlot(rebuilt, slot) end
 	if prominence ~= 1 then
 		ops.set_prominence({ componentId = rebuilt:GetAttribute("componentId"), level = prominence })
 	end
@@ -226,7 +304,14 @@ function ops.swap_products(op: { [string]: any }): (boolean, string?)
 	if not a then return false, "unknown componentId " .. tostring(op.componentIdA) end
 	if not b then return false, "unknown componentId " .. tostring(op.componentIdB) end
 
-	local keys = { "productId", "title", "price", "garmentColour", "garmentOnLegs", "signageText" }
+	-- shirtTemplateId/pantsTemplateId/imageAssetId were missing here, so a
+	-- swap updated the sign and billboard text (via refreshText) but left the
+	-- actual garment on each mannequin untouched -- the labels swapped, the
+	-- clothing didn't.
+	local keys = {
+		"productId", "title", "price", "garmentColour", "garmentOnLegs", "signageText",
+		"shirtTemplateId", "pantsTemplateId", "imageAssetId",
+	}
 	for _, key in ipairs(keys) do
 		local av, bv = a:GetAttribute(key), b:GetAttribute(key)
 		a:SetAttribute(key, bv)
@@ -234,75 +319,76 @@ function ops.swap_products(op: { [string]: any }): (boolean, string?)
 	end
 	ComponentLibrary.refreshText(a)
 	ComponentLibrary.refreshText(b)
+	ComponentLibrary.refreshGarment(a)
+	ComponentLibrary.refreshGarment(b)
 	return true
 end
 
 -- ---------------------------------------------------------------- sightlines
 
 --[[
-	How visible a slot actually is, as opposed to how close it is.
+	How visible a component actually is at wherever it currently stands.
 
-	trafficRank is derived from walking distance to the spawn, which says
-	nothing about whether a display can be seen from the floor around it. In
-	this place Slot_B is the closest slot to spawn and is also hidden behind a
-	doorframe, so the two measures disagree — and a product can be starved of
-	impressions by scenery rather than by placement.
-
-	Sampled by raycasting to the slot from a fan of points in front of it.
+	Sampled per-component now (not per-slot): freeform placement means "how
+	visible is this spot" has to be measured live at the component's own
+	position/facing rather than looked up from a hand-set slot attribute.
+	Sampled by raycasting to the component from a fan of points in front of it.
 ]]
 local SIGHT_RADII = { 8, 14, 20, 28 }
-local SIGHT_SPREAD = 80 -- degrees either side of the slot's facing
+local SIGHT_SPREAD = 80 -- degrees either side of the component's facing
 
 function StorefrontAPI.computeSightlines(): string
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 
+	local components = CollectionService:GetTagged("StorefrontComponent")
 	local ignore = {}
-	for _, m in ipairs(CollectionService:GetTagged("StorefrontComponent")) do
+	for _, m in ipairs(components) do
 		table.insert(ignore, m)
 	end
-	for _, s in ipairs(CollectionService:GetTagged("StorefrontSlot")) do
-		table.insert(ignore, s)
-	end
+	local region = findRegion()
+	if region then table.insert(ignore, region) end
 	local forcefields = workspace:FindFirstChild("Forcefields")
 	if forcefields then table.insert(ignore, forcefields) end
 	params.FilterDescendantsInstances = ignore
 
 	local results = {}
-	for _, slot in ipairs(CollectionService:GetTagged("StorefrontSlot")) do
-		local target = slot.Position + Vector3.new(0, 4, 0)
-		local facing = slot:GetAttribute("facing") or Vector3.new(0, 0, 1)
-		local baseAngle = math.atan2(facing.Z, facing.X)
+	for _, model in ipairs(components) do
+		if model:IsA("Model") then
+			local pivot = model:GetPivot()
+			local target = pivot.Position + Vector3.new(0, 4, 0)
+			local facing = pivot.LookVector
+			local baseAngle = math.atan2(facing.Z, facing.X)
 
-		local visible, total = 0, 0
-		for _, radius in ipairs(SIGHT_RADII) do
-			for deg = -SIGHT_SPREAD, SIGHT_SPREAD, 20 do
-				local angle = baseAngle + math.rad(deg)
-				local from = Vector3.new(
-					slot.Position.X + math.cos(angle) * radius,
-					slot.Position.Y + 3,
-					slot.Position.Z + math.sin(angle) * radius
-				)
-				-- Only count vantage points that are themselves standable.
-				local ground = workspace:Raycast(from + Vector3.new(0, 6, 0), Vector3.new(0, -14, 0), params)
-				if ground then
-					total += 1
-					if not workspace:Raycast(from, target - from, params) then
-						visible += 1
+			local visible, total = 0, 0
+			for _, radius in ipairs(SIGHT_RADII) do
+				for deg = -SIGHT_SPREAD, SIGHT_SPREAD, 20 do
+					local angle = baseAngle + math.rad(deg)
+					local from = Vector3.new(
+						pivot.Position.X + math.cos(angle) * radius,
+						pivot.Position.Y + 3,
+						pivot.Position.Z + math.sin(angle) * radius
+					)
+					-- Only count vantage points that are themselves standable.
+					local ground = workspace:Raycast(from + Vector3.new(0, 6, 0), Vector3.new(0, -14, 0), params)
+					if ground then
+						total += 1
+						if not workspace:Raycast(from, target - from, params) then
+							visible += 1
+						end
 					end
 				end
 			end
-		end
 
-		local score = total > 0 and (visible / total) or 0
-		slot:SetAttribute("visibilityScore", math.floor(score * 1000) / 1000)
-		slot:SetAttribute("visibilitySamples", total)
-		results[slot:GetAttribute("slotId")] = {
-			score = math.floor(score * 1000) / 1000,
-			visible = visible,
-			samples = total,
-			trafficRank = slot:GetAttribute("trafficRank"),
-		}
+			local score = total > 0 and (visible / total) or 0
+			model:SetAttribute("visibilityScore", math.floor(score * 1000) / 1000)
+			model:SetAttribute("visibilitySamples", total)
+			results[model:GetAttribute("componentId")] = {
+				score = math.floor(score * 1000) / 1000,
+				visible = visible,
+				samples = total,
+			}
+		end
 	end
 
 	return HttpService:JSONEncode(results)
@@ -436,19 +522,7 @@ end
 -- ------------------------------------------------------------------- reading
 
 function StorefrontAPI.registry(): string
-	local slots, components = {}, {}
-
-	for _, s in ipairs(CollectionService:GetTagged("StorefrontSlot")) do
-		local facing = s:GetAttribute("facing") or Vector3.new(0, 0, 1)
-		table.insert(slots, {
-			slotId = s:GetAttribute("slotId"),
-			trafficRank = s:GetAttribute("trafficRank"),
-			visibilityScore = s:GetAttribute("visibilityScore"),
-			pos = { s.Position.X, s.Position.Y, s.Position.Z },
-			facing = { facing.X, facing.Y, facing.Z },
-		})
-	end
-	table.sort(slots, function(a, b) return (a.trafficRank or 99) < (b.trafficRank or 99) end)
+	local components = {}
 
 	for _, m in ipairs(CollectionService:GetTagged("StorefrontComponent")) do
 		local pivot = m:GetPivot()
@@ -457,25 +531,38 @@ function StorefrontAPI.registry(): string
 			productId = m:GetAttribute("productId"),
 			title = m:GetAttribute("title"),
 			price = m:GetAttribute("price"),
-			slotId = m:GetAttribute("slotId"),
 			kind = m:GetAttribute("kind"),
 			prominence = m:GetAttribute("prominence") or 1,
 			interactionEnabled = m:GetAttribute("interactionEnabled") ~= false,
 			ctaText = m:GetAttribute("ctaText"),
 			signageText = m:GetAttribute("signageText"),
+			visibilityScore = m:GetAttribute("visibilityScore"),
 			pos = { pivot.Position.X, pivot.Position.Y, pivot.Position.Z },
 			facing = { pivot.LookVector.X, pivot.LookVector.Y, pivot.LookVector.Z },
 		})
 	end
 	table.sort(components, function(a, b) return tostring(a.componentId) < tostring(b.componentId) end)
 
+	local region = findRegion()
+	local regionJson = nil
+	if region then
+		local _, yaw = region.CFrame:ToEulerAnglesXYZ()
+		regionJson = {
+			center = { region.Position.X, region.Position.Z },
+			size = { region.Size.X, region.Size.Z },
+			rotationY = math.deg(yaw),
+			floorY = region.Position.Y + region.Size.Y / 2,
+		}
+	end
+
 	return HttpService:JSONEncode({
-		slots = slots,
 		components = components,
+		region = regionJson,
 		kinds = ComponentLibrary.KINDS,
+		hasStorefront = workspace:GetAttribute("HasStorefront") == true,
 		experimentId = workspace:GetAttribute("ExperimentId") or "exp_baseline",
 		place = {
-			name = game.Name,
+			name = publishedPlaceName(),
 			placeId = game.PlaceId,
 			gameId = game.GameId,
 		},
@@ -486,12 +573,14 @@ function StorefrontAPI.snapshot(): string
 	local state = {}
 	for _, m in ipairs(CollectionService:GetTagged("StorefrontComponent")) do
 		local colour = m:GetAttribute("garmentColour")
+		local pivot = m:GetPivot()
 		table.insert(state, {
 			componentId = m:GetAttribute("componentId"),
 			productId = m:GetAttribute("productId"),
 			title = m:GetAttribute("title"),
 			price = m:GetAttribute("price"),
-			slotId = m:GetAttribute("slotId"),
+			pos = { pivot.Position.X, pivot.Position.Y, pivot.Position.Z },
+			facingDegrees = math.deg(math.atan2(pivot.LookVector.Z, pivot.LookVector.X)),
 			kind = m:GetAttribute("kind"),
 			prominence = m:GetAttribute("prominence") or 1,
 			interactionEnabled = m:GetAttribute("interactionEnabled") ~= false,
@@ -538,8 +627,13 @@ function StorefrontAPI.restore(json: string): string
 					Color3.new(entry.garmentColour[1], entry.garmentColour[2], entry.garmentColour[3]))
 			end
 			ops.set_prominence({ componentId = entry.componentId, level = entry.prominence or 1 })
-			local slot = entry.slotId and findSlot(entry.slotId)
-			if slot then placeAtSlot(model, slot) end
+			if entry.pos then
+				local p = entry.pos
+				local rad = math.rad(entry.facingDegrees or 0)
+				local facing = Vector3.new(math.cos(rad), 0, math.sin(rad))
+				local base = Vector3.new(p[1], p[2], p[3])
+				model:PivotTo(CFrame.lookAt(base, base + facing))
+			end
 			ComponentLibrary.refreshText(model)
 			table.insert(restored, entry.componentId)
 		end

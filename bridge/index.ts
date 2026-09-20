@@ -56,7 +56,7 @@ async function report(body: Record<string, unknown>): Promise<void> {
  * Pulls the registry back out of Studio and stores it.
  *
  * Without this the backend keeps describing the layout from before the apply,
- * so the dashboard draws displays in the wrong slots and the model reasons
+ * so the dashboard draws displays in the wrong spots and the model reasons
  * about a store that no longer exists — and nothing looks broken while it does.
  */
 async function refreshRegistry(bridge: StudioBridge): Promise<void> {

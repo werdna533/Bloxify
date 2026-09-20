@@ -2,6 +2,7 @@ export type Env = {
   DB: D1Database;
   SHOTS: R2Bucket;
   EXPERIMENT_RUN: DurableObjectNamespace;
+  STOREFRONT_SETUP: DurableObjectNamespace;
   BACKEND_AUTH_TOKEN: string;
   OPENAI_API_KEY: string;
 };

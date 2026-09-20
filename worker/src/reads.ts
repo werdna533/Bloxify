@@ -10,25 +10,26 @@ import {
   type ComponentMetrics,
 } from "./metrics";
 
-type RegistrySlot = { slotId: string; trafficRank: number; visibilityScore?: number | null; pos: number[]; facing: number[] };
+type RegistryRegion = { center: number[]; size: number[]; rotationY: number; floorY: number };
 type RegistryComponent = {
   componentId: string;
   productId: string;
   title: string;
   price: number;
-  slotId: string;
   kind: string;
   prominence: number;
   interactionEnabled: boolean;
   ctaText?: string;
   signageText?: string;
+  visibilityScore?: number | null;
   pos: number[];
   facing: number[];
 };
 type Registry = {
-  slots: RegistrySlot[];
+  region: RegistryRegion | null;
   components: RegistryComponent[];
   kinds: string[];
+  hasStorefront: boolean;
   experimentId: string;
   place?: { name: string; placeId: number; gameId: number };
 };
@@ -45,17 +46,17 @@ export async function analytics(request: Request, env: Env): Promise<Response> {
 
   const registry = await getRegistryData(env);
   const metrics = await componentMetrics(env, experimentId, source);
-  const bySlot = new Map(registry?.components.map((c) => [c.componentId, c]) ?? []);
-  const rankBySlot = new Map(registry?.slots.map((s) => [s.slotId, s.trafficRank]) ?? []);
+  const byComponent = new Map(registry?.components.map((c) => [c.componentId, c]) ?? []);
 
   const rows = metrics.map((m) => {
-    const component = bySlot.get(m.componentId);
+    const component = byComponent.get(m.componentId);
     return {
       ...m,
       title: component?.title ?? m.componentId,
       price: component?.price ?? null,
-      slotId: component?.slotId ?? null,
-      trafficRank: component ? (rankBySlot.get(component.slotId) ?? null) : null,
+      pos: component?.pos ?? null,
+      facing: component?.facing ?? null,
+      visibilityScore: component?.visibilityScore ?? null,
       kind: component?.kind ?? null,
       prominence: component?.prominence ?? null,
     };
@@ -66,7 +67,8 @@ export async function analytics(request: Request, env: Env): Promise<Response> {
     source,
     experiments: await experimentIds(env),
     sourceBreakdown: await sourceBreakdown(env, experimentId),
-    slots: registry?.slots ?? [],
+    region: registry?.region ?? null,
+    hasStorefront: registry?.hasStorefront ?? false,
     place: registry?.place ?? null,
     components: rows,
     heatmap: wantHeatmap ? await bucketedLayer(env, ["path_point"], experimentId, source, 2) : undefined,
@@ -146,7 +148,6 @@ export async function heatmap(request: Request, env: Env): Promise<Response> {
       componentId: c.componentId,
       title: c.title,
       price: c.price,
-      slotId: c.slotId,
       pos: c.pos,
       impressions,
       approaches,
@@ -174,9 +175,13 @@ export async function heatmap(request: Request, env: Env): Promise<Response> {
   const pullMedian = median(items.map((i) => i.pullRate ?? 0));
   const intentMedian = median(items.map((i) => i.intentRate ?? 0));
 
+  // Strictly greater than, not >=. With small sample sizes, rates cluster on
+  // round numbers (0%, 100%) and often tie exactly at the median -- with >=,
+  // every tied item lands on the "high" side of both axes at once, which is
+  // how a whole 5-product catalog could all classify as "hotspot" together.
   const classified = items.map((i) => {
-    const pull = (i.pullRate ?? 0) >= pullMedian;
-    const intent = (i.intentRate ?? 0) >= intentMedian;
+    const pull = (i.pullRate ?? 0) > pullMedian;
+    const intent = (i.intentRate ?? 0) > intentMedian;
     const quadrant = pull && intent ? "hotspot" : pull && !intent ? "attracts_but_disappoints" : !pull && intent ? "hidden_gem" : "dead_weight";
     return { ...i, quadrant };
   });
@@ -191,7 +196,7 @@ export async function heatmap(request: Request, env: Env): Promise<Response> {
     tabFlows,
     items: classified,
     thresholds: { pullMedian, intentMedian },
-    slots: registry?.slots ?? [],
+    region: registry?.region ?? null,
   });
 }
 

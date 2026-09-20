@@ -10,12 +10,17 @@ dotenv.config({ path: path.resolve(here, "..", ".env.local"), quiet: true });
 const BASE_URL = process.env.TUNNEL_URL ?? "http://localhost:3000";
 const AUTH_TOKEN = process.env.BACKEND_AUTH_TOKEN ?? "";
 
+// Optional: npx tsx pull-registry.ts "Place1" targets a specific open Studio
+// by name when more than one is connected.
+const studioFilter = process.argv[2];
+
 const bridge = new StudioBridge();
 await bridge.connect();
 
 const result = await bridge.executeLuau(
   `return require(game.ServerScriptService.Storefront.StorefrontAPI).registry()`,
   "Edit",
+  studioFilter,
 );
 await bridge.close();
 
@@ -24,7 +29,7 @@ if (result.isError) {
   process.exit(1);
 }
 
-const registry = JSON.parse(result.text) as { slots: unknown[]; components: unknown[] };
+const registry = JSON.parse(result.text) as { components: unknown[] };
 
 const res = await fetch(`${BASE_URL}/api/registry`, {
   method: "POST",

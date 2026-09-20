@@ -17,8 +17,18 @@ const BASE_URL = process.env.TUNNEL_URL ?? "http://localhost:3000";
 const AUTH_TOKEN = process.env.BACKEND_AUTH_TOKEN ?? "";
 
 const LUAU = `
-local MIN = Vector3.new(-130, -2, -20)
-local MAX = Vector3.new(-30, 30, 140)
+local CollectionService = game:GetService("CollectionService")
+
+-- Bounds come from the StorefrontRegion part any place using this package
+-- must tag, plus generous vertical padding -- not hardcoded per-room numbers,
+-- so this script works on someone else's place, not just this one.
+local region = CollectionService:GetTagged("StorefrontRegion")[1]
+if not region then
+	error("export-geometry: no Part tagged StorefrontRegion in this place")
+end
+local half = region.Size / 2
+local MIN = region.Position - Vector3.new(half.X + 20, 20, half.Z + 20)
+local MAX = region.Position + Vector3.new(half.X + 20, 30, half.Z + 20)
 local MAX_PARTS = 500
 
 -- Skip anything too small to help a reader orient, plus our own storefront
@@ -70,9 +80,13 @@ return game:GetService("HttpService"):JSONEncode({
 })
 `;
 
+// Optional: npx tsx export-geometry.ts "Place1" targets a specific open
+// Studio by name when more than one is connected.
+const studioFilter = process.argv[2];
+
 const bridge = new StudioBridge();
 await bridge.connect();
-const result = await bridge.executeLuau(LUAU, "Edit");
+const result = await bridge.executeLuau(LUAU, "Edit", studioFilter);
 await bridge.close();
 
 if (result.isError) {

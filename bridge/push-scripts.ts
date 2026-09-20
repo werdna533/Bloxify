@@ -105,9 +105,13 @@ end
 return results
 `;
 
+// Optional: npx tsx push-scripts.ts "Place1" targets a specific open Studio
+// by name when more than one is connected, instead of the first one listed.
+const studioFilter = process.argv[2];
+
 const bridge = new StudioBridge();
 await bridge.connect();
-const result = await bridge.executeLuau(luau, "Edit");
+const result = await bridge.executeLuau(luau, "Edit", studioFilter);
 if (result.isError) {
   console.error(`[push] FAILED: ${result.text}`);
   await bridge.close();
