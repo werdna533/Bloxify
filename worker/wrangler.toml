@@ -13,10 +13,18 @@ database_id = "64c01bce-c821-4a16-9a78-8e091c78b1e2"
 name = "EXPERIMENT_RUN"
 class_name = "ExperimentRun"
 
+[[durable_objects.bindings]]
+name = "STOREFRONT_SETUP"
+class_name = "StorefrontSetup"
+
 # SQLite-backed DOs; required on the free plan.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ExperimentRun"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["StorefrontSetup"]
 
 # Before/after screen captures pulled back from Studio.
 [[r2_buckets]]

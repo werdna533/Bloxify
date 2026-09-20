@@ -16,6 +16,10 @@ export const env = {
   shopifyAdminToken: process.env.SHOPIFY_ADMIN_TOKEN ?? "",
   shopifyClientSecret: process.env.SHOPIFY_CLIENT_SECRET ?? "",
   openaiApiKey: process.env.OPENAI_API_KEY ?? "",
+  // Optional: only needed for automated (non-MCP) asset upload during
+  // Create Storefront. See README "Bring your own Roblox game".
+  robloxApiKey: process.env.ROBLOX_API_KEY ?? "",
+  robloxCreatorId: process.env.ROBLOX_CREATOR_ID ?? "",
 };
 
 export function requireAuth(request: Request): { ok: true } | { ok: false; response: Response } {

@@ -1,11 +1,13 @@
 import { requireAuth, type Env } from "./env";
 import { ExperimentRun } from "./experiment-run";
+import { StorefrontSetup } from "./storefront-setup";
 import { proposePlan, validatePlan, type Plan } from "./plan";
+import { proposeStorefrontLayout, type ProductInput, type Region as StorefrontRegion } from "./storefront-agent";
 import { ingestEvents } from "./ingest";
-import { getRegistry, postRegistry, getGeometry, postGeometry } from "./kv";
+import { getRegistry, postRegistry, getGeometry, postGeometry, readKv } from "./kv";
 import { analytics, heatmap, compare } from "./reads";
 
-export { ExperimentRun };
+export { ExperimentRun, StorefrontSetup };
 
 type QueuedRow = {
   id: string;
@@ -42,8 +44,17 @@ export default {
     if (pathname === "/experiments" && request.method === "GET") return listExperiments(env);
     if (pathname === "/experiments" && request.method === "POST") return createExperiment(request, env);
 
+    if (pathname === "/storefront/create" && request.method === "POST") return createStorefront(request, env);
+    if (pathname === "/storefront/queue" && request.method === "POST") return queueStorefront(request, env);
+    if (pathname === "/storefront/pending" && request.method === "GET") return storefrontPending(env);
+    if (pathname === "/storefront/report" && request.method === "POST") return storefrontReport(request, env);
+    if (pathname === "/storefront/status" && request.method === "GET") return storefrontStatus(env);
+
     const queued = pathname.match(/^\/experiments\/([^/]+)\/(apply|rollback)$/);
     if (queued && request.method === "POST") return queueExperiment(env, queued[1], queued[2]);
+
+    const single = pathname.match(/^\/experiments\/([^/]+)$/);
+    if (single && request.method === "DELETE") return deleteExperiment(env, single[1]);
 
     const shot = pathname.match(/^\/shots\/(.+)$/);
     if (shot && request.method === "GET") return readShot(env, shot[1]);
@@ -198,7 +209,7 @@ async function plan(request: Request, env: Env): Promise<Response> {
 
 type RegistryShape = {
   components: { componentId: string }[];
-  slots: { slotId: string }[];
+  region: { center: number[]; size: number[]; rotationY: number; floorY: number } | null;
   kinds: string[];
 };
 
@@ -245,6 +256,25 @@ async function createExperiment(request: Request, env: Env): Promise<Response> {
   return Response.json({ id, status: "draft", ops: accepted.length });
 }
 
+async function deleteExperiment(env: Env, id: string): Promise<Response> {
+  const row = await env.DB.prepare(`SELECT status FROM experiments WHERE id = ?`)
+    .bind(id)
+    .first<{ status: string }>();
+  if (!row) return Response.json({ error: `unknown experiment ${id}` }, { status: 404 });
+
+  // A claimed job the bridge could be actively working through right now --
+  // deleting it out from under that in-flight run would just orphan the claim.
+  if (row.status === "applying" || row.status === "rolling_back") {
+    return Response.json(
+      { error: `experiment is ${row.status} — wait for it to finish before deleting` },
+      { status: 409 },
+    );
+  }
+
+  await env.DB.prepare(`DELETE FROM experiments WHERE id = ?`).bind(id).run();
+  return Response.json({ ok: true, id });
+}
+
 async function queueExperiment(env: Env, id: string, verb: string): Promise<Response> {
   const row = await env.DB.prepare(
     `SELECT id, status, plan_json, snapshot_before_json FROM experiments WHERE id = ?`,
@@ -268,6 +298,81 @@ async function queueExperiment(env: Env, id: string, verb: string): Promise<Resp
     .run();
 
   return Response.json({ id, status });
+}
+
+// ------------------------------------------------------------- storefront
+
+/**
+ * The Cloudflare side of "Create Storefront": reasons about the catalog and
+ * the room's own cached region and returns a classified, positioned job.
+ *
+ * Deliberately does not queue the job itself -- asset processing (garment
+ * texture generation, Roblox Open Cloud upload) needs `sharp`, a native
+ * binary that cannot run in a Worker, so the Next.js backend does that step
+ * in between this call and /storefront/queue.
+ */
+async function createStorefront(request: Request, env: Env): Promise<Response> {
+  const body = await request.json<{ products?: ProductInput[] }>();
+  if (!Array.isArray(body.products) || body.products.length === 0) {
+    return Response.json({ error: "products is required and must be non-empty" }, { status: 400 });
+  }
+
+  const registry = (await readKv(env, "registry")) as { region?: StorefrontRegion } | null;
+  if (!registry?.region) {
+    return Response.json(
+      { error: "no StorefrontRegion in the registry -- tag a Part StorefrontRegion in Studio and run export-geometry.ts / pull-registry.ts first" },
+      { status: 400 },
+    );
+  }
+
+  const result = await proposeStorefrontLayout(env, {
+    products: body.products,
+    region: registry.region,
+  });
+  if (!result.ok) return Response.json({ error: result.error }, { status: 502 });
+
+  return Response.json({ ok: true, count: result.job.length, job: result.job });
+}
+
+// Queues a job (already enriched with asset ids, or not) for the Roblox
+// poller. Separate from createStorefront so the Next.js backend can do
+// asset processing in between reasoning and queueing.
+async function queueStorefront(request: Request, env: Env): Promise<Response> {
+  const body = await request.json<{ job?: unknown[] }>();
+  if (!Array.isArray(body.job) || body.job.length === 0) {
+    return Response.json({ error: "job is required and must be non-empty" }, { status: 400 });
+  }
+
+  const setup = storefrontStub(env);
+  await setup.fetch(new Request("https://do/start", { method: "POST", body: JSON.stringify({ job: body.job }) }));
+
+  return Response.json({ ok: true, count: body.job.length });
+}
+
+// The Roblox poller calls this on its own timer -- plain HTTP, no MCP.
+async function storefrontPending(env: Env): Promise<Response> {
+  const setup = storefrontStub(env);
+  const claimed = await setup.fetch(new Request("https://do/claim", { method: "POST" }));
+  return Response.json(await claimed.json());
+}
+
+// The Roblox poller posts back once it finishes building (or fails).
+async function storefrontReport(request: Request, env: Env): Promise<Response> {
+  const body = await request.text();
+  const setup = storefrontStub(env);
+  const result = await setup.fetch(new Request("https://do/report", { method: "POST", body }));
+  return Response.json(await result.json());
+}
+
+// The dashboard polls this while waiting for a queued layout to be built.
+async function storefrontStatus(env: Env): Promise<Response> {
+  const setup = storefrontStub(env);
+  const state = await setup.fetch(new Request("https://do/state"));
+  return Response.json(await state.json());
+}
+
+function storefrontStub(env: Env): DurableObjectStub {
+  return env.STOREFRONT_SETUP.get(env.STOREFRONT_SETUP.idFromName("singleton"));
 }
 
 // Before/after captures live in R2, not as base64 blobs in a database row.
