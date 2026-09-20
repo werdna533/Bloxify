@@ -1,235 +1,272 @@
-# Commerce Lab — Roblox × Shopify
+# Commerce Lab
 
-A Shopify store inside a Roblox world. We record what players actually do
-around the products — where they walk, what they look at, what they touch.
-An AI reads that behaviour, forms a hypothesis, and **rebuilds the storefront
-inside Roblox Studio itself**. Then you can see the change and roll it back.
+**An AI merchandising agent for Shopify products inside Roblox.**
 
-**Observe → Understand → Change → Test → Observe.**
+Commerce Lab observes how players move through a Roblox storefront, identifies
+where the product funnel loses attention, proposes a storefront change, applies
+it in Roblox Studio, and captures the result.
 
----
+`Observe -> Understand -> Change -> Test`
 
-## Why the data is different
+## Features
 
-A web analytics pixel can tell you someone loaded a product page. It cannot
-tell you that a player walked past a display six times without ever seeing it,
-because there is no such thing as standing behind a shelf on a web page.
+- Live Roblox telemetry for physical displays and product panels.
+- Seven-stage funnel: impression, approach, gaze, interaction, panel, CTA,
+  purchase.
+- Shopify product catalog and purchase attribution through claim codes.
+- AI-generated merchandising hypotheses and structured change plans, aware of
+  the actual Roblox game and room shape it's reasoning about, product price,
+  and its own prior experiments — not just funnel numbers in isolation.
+- Safety validation against the live Roblox registry.
+- Freeform (x, z, facing) placement, validated against the room's region
+  bounds, other displays, and real geometry collisions before anything moves.
+- `swap_products`: trade two displays' positions to test whether a slot, not
+  the product, explains a performance gap.
+- One-click apply through Roblox Studio MCP, with before-apply snapshots,
+  one-click rollback, and experiment record deletion for cleaning up history.
+- Before/after screenshots stored in Cloudflare R2.
+- Experiment state and job coordination with Cloudflare D1 and Durable Objects.
+- Dashboard analytics, product funnel, a live 3D view of attention in the
+  actual room (heat, sightlines, and hotspot/window-shopper/hidden-gem/
+  dead-weight quadrants), and experiment comparison. The sidebar shows the
+  connected Roblox game's own name and thumbnail, not a static logo.
+- **Create Storefront**: a second Cloudflare agent that classifies your
+  Shopify catalog into display types, computes a layout that clears the
+  room's real geometry, and queues it for the Roblox place's own script to
+  build — no MCP, no Studio session, works for a place you've never opened
+  in this tool before.
 
-The funnel here has seven stages where a normal store has about three:
+## Tech stack
 
-```
-impression → approach → gaze → interact → panel open → CTA → purchase
- (saw it)   (walked to) (looked) (touched)  (wanted more) (wanted it)
-```
+- **Roblox:** Luau, Studio MCP.
+- **Frontend:** Next.js, React, TypeScript.
+- **Agent backend:** Cloudflare Workers, D1, Durable Objects, R2.
+- **Commerce:** Shopify Admin GraphQL API and orders webhook.
+- **Local Bridge:** Node.js, TypeScript, Model Context Protocol SDK.
+- **Tunnel:** Cloudflare Tunnel for Roblox and Shopify webhook access.
 
-Each drop-off points at a different fix, and the AI's job is to name which
-drop-off is the problem rather than guess at a cause:
+## Requirements
 
-| Drop-off | Reading | The move |
-|---|---|---|
-| Few impressions | never seen — placement or blocked sightline | `move_to_slot` |
-| Impressions, few approaches | uninteresting from a distance | `set_prominence`, `set_kind` |
-| Approaches, little gaze | facing the wrong way | `move_to_slot` (snaps to slot facing) |
-| Gaze, no interaction | no visible affordance | `enable_interaction`, `set_cta_text` |
-| Interaction, no panel time | panel content is weak | flagged, not "fixed" by layout |
-| Panel time, no CTA | price or product mismatch | flagged for the merchant |
+- Node.js 20 or newer.
+- Roblox Studio with Studio MCP enabled.
+- An MCP-compatible AI client for initial Roblox place setup, such as Claude
+  Code. Use your own client subscription and credentials.
+- `cloudflared`.
+- Shopify development store and custom app credentials.
+- Cloudflare account with Workers, D1, Durable Objects, and R2 access.
+- Optional: a Roblox Open Cloud API key, only needed for **Create
+  Storefront** to upload product/garment images automatically (see below).
+  Without one, Create Storefront still builds the layout, just with
+  placeholder art until you upload assets manually.
 
-Three time metrics are tracked and **never summed**: dwell (near it, weak),
-gaze (looking at it, medium), and panel *active* seconds (panel open *and*
-being used, strong).
+## Setup
 
-No Roblox UserIds or usernames are collected. Sessions are random UUIDs.
+### 1. Clone and install
 
----
-
-## Architecture
-
-```
-                  ┌──────────────┐
-                  │   Shopify    │ products, orders/create webhook
-                  └──────┬───────┘
-                         │ Admin GraphQL
-                         ▼
-   Roblox ──HTTPS──▶ Backend (Next.js + SQLite) ◀──── Dashboard (same app)
-   runtime             │        ▲                          │
-   (telemetry)         │        │ poll for approved plans  │ Analyze / Apply
-                       │    ┌───┴──────────┐               ▼
-                       │    │   Bridge     │◀───── LLM (structured JSON)
-                       │    │ (local Node, │        + validator
-                       │    │  MCP client) │
-                       │    └───┬──────────┘
-                       │        │ stdio MCP
-                       │        ▼
-                       │   Roblox Studio ──▶ StorefrontAPI.apply()
-                       └────────┘
-```
-
-Two Roblox integrations, kept strictly separate:
-
-- **Runtime** — the game POSTs telemetry over HTTPS. Collecting behaviour.
-- **Edit time** — the Bridge drives Studio over MCP. Changing the world.
-
-Studio's MCP server speaks **stdio**, so a web backend cannot reach it. The
-Bridge is a local Node process that can, which is what makes "Apply to Roblox"
-a single button instead of a manual copy-paste.
-
----
-
-## Layout
-
-```
-app/                    Next.js app — API routes and dashboard
-  app/api/              events, analytics, registry, insights,
-                        experiments, bridge, products, claim, shopify/webhook
-  lib/                  db, metrics, ai, plan-schema, validate, shopify
-  scripts/simulate.ts   synthetic session generator
-bridge/                 local MCP client
-  index.ts              poll loop: snapshot → apply → capture → report
-  mcp.ts                stdio MCP wrapper
-  push-scripts.ts       syncs roblox/src into the place (used instead of Rojo)
-  pull-registry.ts      pulls the live registry out of Studio
-roblox/
-  src/                  Luau: telemetry, tracking, StorefrontAPI, panels
-  plugin/               Fallback 2 — applies a plan with no MCP at all
+```powershell
+git clone <repository-url>
+cd htn_26
+cd app
+npm install
+cd ..\bridge
+npm install
+cd ..\worker
+npm install
+cd ..
 ```
 
-**Source-of-truth rule:** code lives in files under `roblox/src` and is pushed
-into the place. The *world* — parts, slots, positions — lives in the place file
-and is changed only through `StorefrontAPI`.
+### 2. Create the local environment file
 
----
-
-## The slot system
-
-The AI never emits raw coordinates. The store has eight named anchor slots,
-each with a `trafficRank` (1 = busiest corridor, 8 = dead corner) and a
-`facing` direction. The only placement operation is
-`move_to_slot(componentId, slotId)`, which means:
-
-- nothing can be placed inside a wall
-- two displays cannot overlap — occupying a taken slot swaps them
-- rotation is solved for free by snapping to the slot's facing
-- validation is a one-line check: does the slot exist?
-
-Components are found by `CollectionService` tag, never by name path, so
-duplicating or renaming things does not break tracking.
-
----
-
-## `StorefrontAPI` — the only surface MCP touches
-
-The AI never writes Luau. It emits a plan of named operations, and this module
-decides whether each one is legal.
-
-| Op | Effect |
-|---|---|
-| `move_to_slot` | move to a slot, snap to its facing, swap if occupied |
-| `set_kind` | rebuild the display from the component library |
-| `set_prominence` | scale 1.0 / 1.25 / 1.5, spotlight, accent colour |
-| `enable_interaction` / `disable_interaction` | toggle the prompt |
-| `set_cta_text` | CTA text, ≤40 chars |
-| `set_signage` | header text, ≤60 chars |
-| `swap_products` | exchange which product sits on which display |
-
-Plus `snapshot()`, `restore(json)` and `registry()`. **Every apply takes a
-snapshot first**, so any experiment is reversible in one call. Partial failure
-is fine: one bad op is rejected with a reason and the rest still apply.
-
----
-
-## Safety rails
-
-- **The validator runs before anything reaches Roblox.** It rejects any op
-  naming a component or slot that is not in the registry pulled live from
-  Studio, more than five ops, contradictory ops on one component, over-length
-  or unsafe text, and prominence outside 1–3. Rejections are shown in the UI
-  with the reason — the model proposes, the validator decides.
-- **The model is told to describe observed patterns, never proven causes**, and
-  never to promise a percentage improvement.
-- **Simulated and live data are never mixed silently.** Every event carries
-  `source`, the dashboard labels counts as SEEDED SIMULATION or LIVE SESSION,
-  and you can filter to either.
-- **A dead backend cannot break the game.** Every HTTP call from Roblox is
-  wrapped, the queue is capped, and events are dropped rather than growing
-  unbounded.
-- **Edits are refused while Studio is in play mode**, because changes made
-  during a playtest are discarded when play stops.
-
----
-
-## Running it
-
-```bash
-# 1. backend + dashboard
-cd app && npm install && npm run dev        # http://localhost:3000
-
-# 2. expose it (Roblox cannot reach localhost)
-cloudflared tunnel --url http://localhost:3000
-#    put the printed URL in .env.local as TUNNEL_URL
-
-# 3. push config and code into the open Studio place
-cd bridge && npm install
-npx tsx sync-config.ts      # carries the backend URL + token into the place
-npx tsx push-scripts.ts     # pushes roblox/src/**/*.lua
-npx tsx pull-registry.ts    # pulls slots + components back out
-
-# 4. seed some behaviour so the funnel has volume
-cd ../app && npx tsx scripts/simulate.ts --sessions 400
-
-# 5. run the Bridge, then press ANALYZE → SAVE → APPLY TO ROBLOX
-cd ../bridge && npx tsx index.ts
-```
-
-`.env.local` at the repo root holds `SHOPIFY_STORE_DOMAIN`,
-`SHOPIFY_ADMIN_TOKEN`, `SHOPIFY_CLIENT_SECRET`, `OPENAI_API_KEY`,
-`TUNNEL_URL` and `BACKEND_AUTH_TOKEN`. It is gitignored and must stay that way.
-
-To run the agent brain on Cloudflare, add the deployed Worker URL and point the
-Bridge at the same URL:
+Create one `.env.local` at the repository root. Do not create a second
+`worker/.env` file.
 
 ```dotenv
-WORKER_URL=https://htn-lab.<your-subdomain>.workers.dev
-BRIDGE_TARGET=https://htn-lab.<your-subdomain>.workers.dev
+SHOPIFY_STORE_DOMAIN=your-store.myshopify.com
+SHOPIFY_ADMIN_TOKEN=your-shopify-admin-token
+SHOPIFY_CLIENT_SECRET=your-shopify-client-secret
+OPENAI_API_KEY=your-openai-key
+BACKEND_AUTH_TOKEN=generate-a-random-shared-token
+CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
+CLOUDFLARE_ACCOUNT_ID=your-cloudflare-account-id
+TUNNEL_URL=https://your-tunnel.trycloudflare.com
+WORKER_URL=https://your-worker.workers.dev
+BRIDGE_TARGET=https://your-worker.workers.dev
+
+# Optional -- only needed for Create Storefront's automated asset upload.
+# Roblox Creator Dashboard -> Open Cloud -> API Keys -> asset:read + asset:write.
+# ROBLOX_API_KEY=your-open-cloud-api-key
+# ROBLOX_CREATOR_ID=your-numeric-roblox-user-id
 ```
 
-With those values set, Analyze, experiment save/list, Apply, Roll back, and
-Bridge polling use the Worker. Telemetry, analytics, and the dashboard's
-spatial views continue to use the local Next.js app.
+`.env.local` is gitignored. Never commit credentials.
 
-From `worker/`, after the Cloudflare resources exist:
+### 3. Prepare Cloudflare
 
-```bash
+From `worker/`:
+
+```powershell
 npx wrangler d1 create htn-lab
 npx wrangler r2 bucket create htn-lab-shots
+```
+
+Put the returned D1 database ID into `worker/wrangler.toml`, keeping the
+bindings named `DB` and `SHOTS`. Then run:
+
+```powershell
 npm run migrate:remote
 npx wrangler secret put BACKEND_AUTH_TOKEN
 npx wrangler secret put OPENAI_API_KEY
 npm run deploy
 ```
 
----
+Set `WORKER_URL` and `BRIDGE_TARGET` to the deployed Worker URL.
 
-## Fallback ladder
+### 4. Prepare Roblox Studio
 
-The top tier works, but each rung below it is real and tested:
+1. Open the target Roblox place.
+2. Enable **Game Settings -> Security -> Allow HTTP Requests**.
+3. Enable **Assistant -> Manage MCP Servers -> Studio as MCP server**.
+4. Connect your own MCP-compatible AI client to Studio MCP.
+5. Create one Part covering the walkable floor area and tag it
+   `StorefrontRegion` (this is the only physical layout step — placement
+   itself is freeform `(x, z, facing)` from here, not hand-placed slots).
+6. If displays already exist, tag them `StorefrontComponent` and give them
+   `componentId`, `productId`, `title`, `price`, `kind`, and `prominence`
+   attributes. **Starting from a blank place with no displays at all?** Skip
+   this — that's what **Create Storefront** (step 7) is for.
 
-1. **Full** — dashboard button → backend → Bridge → MCP → Studio changes.
-2. **Fallback 1** — the dashboard produces a validated plan; paste it into a
-   Claude Code session connected to Studio MCP.
-3. **Fallback 2** — the `roblox/plugin` Studio plugin applies a plan with no
-   MCP and no Bridge, either fetched from the backend or pasted into
-   `ServerStorage.PendingPlan`. Snapshots first, and can roll back.
-4. **Fallback 3** — two saved place states, with the analysis still generated
-   live.
+The committed Roblox modules are reusable across places:
 
----
+- `roblox/src/ServerScriptService/Storefront/ComponentLibrary.lua`
+- `roblox/src/ServerScriptService/Storefront/StorefrontAPI.lua`
+- `roblox/src/ServerScriptService/Telemetry/Telemetry.lua`
+- `roblox/src/StarterPlayer/StarterPlayerScripts/ProductPanel.lua`
 
-## Deliberately not tracked yet
+The `.server.lua` and `.client.lua` files are entrypoints that start these
+modules, including `StorefrontSetup.server.lua` (polls the Worker for a
+pending Create Storefront job and builds it — plain Luau, no MCP) and
+`GeometryExport.server.lua` (captures the room shell for the dashboard's 3D
+view and pushes it on server start — also plain Luau, no MCP; see step 6).
+The AI only emits named operations; it never writes arbitrary Luau or raw
+coordinates.
 
-Chosen, not missed:
+### 5. Start the local app and tunnel
 
-- other players nearby (social proof and crowding) — needs several
-  simultaneous players to mean anything
-- full traversal order as a sequence model
-- where in the room players were when they quit
-- emote and avatar behaviour near products
+Terminal 1:
+
+```powershell
+cd app
+npm run dev
+```
+
+Terminal 2:
+
+```powershell
+cloudflared tunnel --url http://localhost:3000
+```
+
+Copy the printed `trycloudflare.com` URL into `TUNNEL_URL` in `.env.local`.
+Keep this terminal open. Quick tunnel URLs change when the process restarts.
+
+### 6. Sync Roblox and start the Bridge
+
+Restart the terminal after editing `.env.local`, then run:
+
+```powershell
+cd bridge
+npx tsx sync-config.ts
+npx tsx push-scripts.ts
+npx tsx pull-registry.ts
+npx tsx index.ts
+```
+
+Room geometry for the dashboard's 3D view no longer needs a manual step: once
+the place is running (Play, or in production), `GeometryExport.server.lua`
+captures it from the `StorefrontRegion` part's bounds and pushes it on server
+start automatically — no MCP session required at that point. If you're
+actively reshaping the room and don't want to wait for the next server
+restart, `npx tsx export-geometry.ts` still exists as a manual on-demand
+re-sync, driven the same way as `pull-registry.ts` above.
+
+Open the dashboard at `http://localhost:3000`, collect live Roblox sessions,
+then use **Analyze -> Save as experiment -> Apply to Roblox**.
+
+### 7. Create Storefront (optional, for a blank place)
+
+If the Roblox place has no `StorefrontComponent`-tagged displays yet, the
+dashboard shows a **Create Storefront** card instead of the usual analytics.
+Clicking it:
+
+1. Fetches your Shopify catalog.
+2. Sends it to the Worker, which classifies each product (Mannequin, plush,
+   generic stand, or wall poster) and lays them out as an evenly spaced row
+   through the `StorefrontRegion` part, facing the region's own local +Z axis
+   (rotate the region in Studio to change which way the row faces) —
+   deterministic math, not an LLM guessing coordinates.
+3. If `ROBLOX_API_KEY`/`ROBLOX_CREATOR_ID` are set, generates a garment
+   texture for clothing items and uploads it plus the panel photo via
+   Roblox's Open Cloud Assets API, no Studio session required. Without a
+   key, the layout still queues; displays get the `ComponentLibrary` default
+   look until you run the existing `bridge/` upload scripts once manually.
+4. Queues the finished job. `StorefrontSetup.server.lua`, already running in
+   the place from step 4, polls for it, builds each display, and validates
+   its position the same way the AI's own `move_to_position` does.
+
+This is the piece that makes the tool usable on a Roblox game you're opening
+for the first time, not just this repo's own demo place. It requires the
+Cloudflare Worker (`WORKER_URL` set) — there's no local-only equivalent,
+since the point is a job queue a live Roblox server can poll without MCP.
+
+## Cloudflare judging track
+
+The deployed Worker is a meaningful part of the agent loop, not static hosting:
+
+- **Workers:** planning, validation, experiment routes, storefront
+  classification/layout, and orchestration.
+- **Durable Objects:** one stateful run per experiment (`ExperimentRun`) and
+  one singleton per place (`StorefrontSetup`), each serializing a claim so
+  two pollers can never double-apply the same job.
+- **D1:** experiment plans, snapshots, statuses, results, and registry state.
+- **R2:** after-apply screenshots from Roblox Studio.
+
+Two judging demonstrations:
+
+`live Roblox behavior -> Worker plan -> validation -> Durable Object job -> Roblox change -> R2 result`
+
+`blank Roblox place -> Worker classifies + lays out the Shopify catalog -> Durable Object job -> Roblox's own poller builds it, no MCP`
+
+## Troubleshooting
+
+- **Dashboard is empty:** collect live Roblox sessions and confirm the tunnel URL
+  is current.
+- **Roblox cannot reach the backend:** enable HTTP requests and check
+  `TUNNEL_URL` in the synced Studio config.
+- **Bridge cannot connect:** Studio must be open with Studio MCP enabled, and
+  the Bridge must run on the same machine.
+- **Changes disappear:** apply through Studio MCP in `Edit` mode, not during a
+  playtest.
+- **Apply/Roll back does nothing after clicking it — the experiment just sits
+  "queued":** the Bridge (`npx tsx bridge/index.ts`) isn't running. Nothing
+  else polls for queued experiments; unlike Create Storefront, this apply
+  path is not self-serve and needs the Bridge process alive on a machine with
+  Studio open in `Edit` mode.
+- **Cloudflare auth fails:** verify the API token has Workers Scripts, D1, and
+  R2 edit permissions for the correct account.
+- **Rollback unavailable:** the Bridge must complete its pre-apply snapshot.
+- **Worker routes intermittently 500 with `error code: 1101`:** check
+  `wrangler tail` for the real exception before assuming a code bug. D1's
+  free tier caps both daily row *writes* and, separately, daily row *reads*;
+  either one exhausting mid-demo produces exactly this symptom on some
+  requests but not others, resetting at 00:00 UTC (or fixed immediately by
+  upgrading to Workers Paid). Don't seed bulk synthetic/demo data into D1 —
+  reserve it for the agent's own state and use local SQLite
+  (`WORKER_URL` unset) for large synthetic seeds.
+
+## Repository layout
+
+```text
+app/       Next.js dashboard and local API
+bridge/    Local MCP client and Studio sync tools
+roblox/    Reusable Luau modules and Studio plugin
+worker/    Cloudflare Worker, D1 migrations, Durable Object, and R2 handling
+```

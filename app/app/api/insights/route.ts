@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
-import { componentMetrics } from "@/lib/metrics";
+import { componentMetrics, heatmap } from "@/lib/metrics";
 import { readRegistry } from "@/app/api/registry/route";
+import { readGeometry } from "@/app/api/geometry/route";
 import { proposePlan } from "@/lib/ai";
 import { validatePlan } from "@/lib/validate";
 import { env } from "@/lib/env";
@@ -29,31 +30,55 @@ export async function POST(request: Request) {
     return Response.json({ error: "no metrics yet — seed or collect some sessions" }, { status: 400 });
   }
 
-  const rankBySlot = new Map(registry.slots.map((s) => [s.slotId, s.trafficRank]));
   const metricsById = new Map(metrics.map((m) => [m.componentId, m]));
+  const traffic = await getHeatmap(body.experimentId ?? null, source);
+  const geometry = await readGeometry();
 
   // Small and structured. The model never sees raw event rows.
   const context = {
     store: {
-      slots: registry.slots.map((s) => ({
-        slotId: s.slotId,
-        trafficRank: s.trafficRank,
-        visibilityScore: s.visibilityScore ?? null,
-      })),
+      game: {
+        name: registry.place?.name ?? null,
+        note:
+          "The actual Roblox game this storefront lives inside -- often self-descriptive of the " +
+          "kind of game it is (an arena/elimination game, an obby, a tycoon, etc). Players are here " +
+          "primarily to play that game; the storefront is something they pass through or visit " +
+          "between rounds, not a dedicated shopping app with captive, browsing-focused foot traffic. " +
+          "Reason about placement with that in mind.",
+      },
+      roomShape: geometry && {
+        footprintStuds: {
+          width: Math.round(geometry.bounds.max[0] - geometry.bounds.min[0]),
+          depth: Math.round(geometry.bounds.max[2] - geometry.bounds.min[2]),
+        },
+        spawnPositions: geometry.spawns.map((s) => ({ name: s.name, x: s.p[0], z: s.p[2] })),
+        structureCount: geometry.boxes.length,
+        note:
+          "The real physical shape of the room, from exported geometry -- the same data the " +
+          "dashboard's own 3D view renders. Use this with busiestAreas and spawnPositions to reason " +
+          "about how players actually move through the space, not just abstract coordinates.",
+      },
+      region: registry.region,
       kinds: registry.kinds,
+      // Real measured foot-traffic density, 2-stud buckets, busiest first.
+      // Replaces a hand-set traffic rank: move_to_position should reason
+      // about these coordinates directly rather than a discrete label.
+      busiestAreas: traffic.slice(0, 20),
       note:
-        "trafficRank 1 is the busiest corridor, 8 is a dead corner. visibilityScore is separate: " +
-        "thing again: the share of nearby standing positions from which the slot can physically be " +
-        "seen, measured by raycast against the room geometry. Do not confuse it with sightlineRate " +
-        "in the metrics, which is a behavioural ratio. A slot can be close to the spawn and still be " +
-        "hidden behind scenery, and moving a product into a low visibilityScore slot will starve it.",
+        "busiestAreas are real path_point counts near those (x,z) coordinates, busiest first. " +
+        "visibilityScore on each component is separate: the share of nearby standing positions " +
+        "from which it can physically be seen, measured by raycast against the room geometry. " +
+        "Do not confuse it with sightlineRate in the metrics, which is a behavioural ratio. A " +
+        "component can sit in a busy area and still be hidden behind scenery, and moving a " +
+        "product to a low-visibilityScore spot will starve it regardless of foot traffic there.",
     },
     components: registry.components.map((c) => ({
       componentId: c.componentId,
       title: c.title,
       price: c.price,
-      slotId: c.slotId,
-      trafficRank: rankBySlot.get(c.slotId) ?? null,
+      pos: c.pos,
+      facing: c.facing,
+      visibilityScore: c.visibilityScore ?? null,
       kind: c.kind,
       prominence: c.prominence,
       interactionEnabled: c.interactionEnabled,
@@ -137,6 +162,22 @@ async function getComponentMetrics(experimentId: string | null, source: "sim" | 
     return data.components;
   }
   return componentMetrics(experimentId, source);
+}
+
+/** Same dual-path pattern as getComponentMetrics: behind the Worker when configured. */
+async function getHeatmap(experimentId: string | null, source: "sim" | "live" | "all") {
+  if (env.workerUrl) {
+    const query = new URLSearchParams({ source });
+    if (experimentId) query.set("experimentId", experimentId);
+    const res = await fetch(`${env.workerUrl}/heatmap?${query}`, {
+      headers: { Authorization: `Bearer ${env.backendAuthToken}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { layers?: { traffic?: { x: number; z: number; n: number }[] } };
+    return data.layers?.traffic ?? [];
+  }
+  return heatmap(experimentId, source === "all" ? "all" : source);
 }
 
 async function getPreviousExperiments() {
